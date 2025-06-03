@@ -2,7 +2,7 @@ import os
 import logging
 from flask import Flask, request
 from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
+    Update, InlineKeyboardButton, InlineKeyboardMarkup
 )
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -177,7 +177,6 @@ async def handle_studying_buttons(update: Update, context: ContextTypes.DEFAULT_
 
 async def handle_create_question_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    state = user_sessions[user_id].get('state')
     step = user_sessions[user_id].get('question_step')
     qdata = user_sessions[user_id].get('question_data', {})
     message = update.effective_message
@@ -329,13 +328,6 @@ def setup_bot():
 
 telegram_app = setup_bot()
 
-# Set webhook ONCE at startup (async)
-@app.before_first_request
-def set_webhook():
-    asyncio.get_event_loop().create_task(
-        telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/webhook/{TOKEN}")
-    )
-
 @app.route(f"/webhook/{TOKEN}", methods=["POST"])
 async def webhook():
     update = Update.de_json(request.get_json(force=True), telegram_app.bot)
@@ -343,4 +335,6 @@ async def webhook():
     return "ok"
 
 if __name__ == "__main__":
+    # Set the webhook before starting Flask
+    asyncio.run(telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/webhook/{TOKEN}"))
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
