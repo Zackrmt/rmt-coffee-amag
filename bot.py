@@ -1,4 +1,5 @@
 import os
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -8,6 +9,13 @@ from telegram.ext import (
     MessageHandler,
     filters
 )
+
+# Initialize Flask app (required for Render web service)
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Study Log Bot is running!", 200
 
 # Bot Token from environment variable
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -57,23 +65,18 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def show_subjects(query) -> None:
     """Show list of subjects to choose from."""
     keyboard = []
-    
-    # Create buttons for each subject
     for i, subject in enumerate(SUBJECTS):
         keyboard.append([InlineKeyboardButton(subject, callback_data=f"subject_{i}")])
     
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await query.edit_message_text(
         text="What subject?",
-        reply_markup=reply_markup
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def start_study_session(query, subject) -> None:
     """Start a new study session."""
     topic_name = query.message.reply_to_message.forum_topic_created.name if query.message.reply_to_message and query.message.reply_to_message.forum_topic_created else "Unknown Topic"
     
-    # Store the current session
     user_sessions[query.from_user.id] = {
         "subject": subject,
         "topic_name": topic_name,
@@ -86,11 +89,10 @@ async def start_study_session(query, subject) -> None:
             InlineKeyboardButton("END STUDY SESSION", callback_data="end_session")
         ]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
         text=f"[{topic_name}] started studying [{subject}].",
-        reply_markup=reply_markup
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def start_break(query) -> None:
@@ -109,11 +111,10 @@ async def start_break(query) -> None:
             InlineKeyboardButton("END STUDY SESSION", callback_data="end_session")
         ]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
         text=f"[{topic_name}] started a break. Break Responsibly, [{topic_name}]!",
-        reply_markup=reply_markup
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def end_break(query) -> None:
@@ -133,11 +134,10 @@ async def end_break(query) -> None:
             InlineKeyboardButton("END STUDY SESSION", callback_data="end_session")
         ]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
         text=f"[{topic_name}] ended their break and started studying.",
-        reply_markup=reply_markup
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def end_study_session(query) -> None:
@@ -149,30 +149,28 @@ async def end_study_session(query) -> None:
     
     topic_name = user_sessions[user_id]["topic_name"]
     subject = user_sessions[user_id]["subject"]
-    
-    # Remove the session
     del user_sessions[user_id]
     
     keyboard = [
         [InlineKeyboardButton("Start Studying", callback_data="start_studying")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
         text=f"[{topic_name}] ended their review on [{subject}]. Congrats [{topic_name}]. If you want to start a study session again, just click the button below",
-        reply_markup=reply_markup
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 def main() -> None:
-    """Start the bot."""
-    # Create the Application and pass it your bot's token.
+    """Start the bot and web server."""
     application = Application.builder().token(TOKEN).build()
-
-    # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(handle_button_click))
 
-    # Run the bot until the user presses Ctrl-C
+    # Run Flask server in a thread if on Render
+    if os.getenv('RENDER'):
+        from threading import Thread
+        Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 10000}).start()
+    
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
