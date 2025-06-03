@@ -10,7 +10,6 @@ from telegram.ext import (
     filters
 )
 
-# Initialize Flask app
 app = Flask(__name__)
 
 @app.route('/')
@@ -21,13 +20,22 @@ TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 SUBJECTS = [
     "CC 🧪", "BACTE 🦠", "VIRO 👾", "MYCO 🍄", "PARA 🪱",
     "CM 🚽💩", "HISTO 🧻🗳️", "MT Laws ⚖️", "HEMA 🩸", "IS ⚛",
-    "BB 🩹", "MolBio 🧬", "RECALLS 🤔💭", "General Books 📚"
+    "BB 🩹", "MolBio 🧬", "RECALLS 🤔💭", "General Books 📚",
+    "Autopsy ☠"  # New subject added
 ]
 
 user_sessions = {}
 
+async def delete_previous_menu(update):
+    """Delete the last menu message if it exists"""
+    if hasattr(update, 'callback_query') and update.callback_query.message:
+        try:
+            await update.callback_query.message.delete()
+        except:
+            pass
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send main menu as new message"""
+    """Send main menu (will be deleted later)"""
     keyboard = [[InlineKeyboardButton("Start Studying", callback_data="start_studying")]]
     await update.message.reply_text(
         "MAIN MENU BUTTON",
@@ -35,7 +43,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle all button clicks with new messages"""
+    """Handle all button clicks"""
     query = update.callback_query
     await query.answer()
     
@@ -52,10 +60,20 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         await end_study_session(query)
 
 async def show_subjects(query) -> None:
-    """Show subjects as new message"""
+    """Show subjects (will be deleted later)"""
+    await delete_previous_menu(query)
+    
     keyboard = []
-    for i, subject in enumerate(SUBJECTS):
-        keyboard.append([InlineKeyboardButton(subject, callback_data=f"subject_{i}")])
+    # Split subjects into two columns for better display
+    half = len(SUBJECTS) // 2
+    for i in range(half):
+        keyboard.append([
+            InlineKeyboardButton(SUBJECTS[i], callback_data=f"subject_{i}"),
+            InlineKeyboardButton(SUBJECTS[i+half], callback_data=f"subject_{i+half}")
+        ])
+    # Add remaining subject if odd number
+    if len(SUBJECTS) % 2 != 0:
+        keyboard.append([InlineKeyboardButton(SUBJECTS[-1], callback_data=f"subject_{len(SUBJECTS)-1}")])
     
     await query.message.reply_text(
         "What subject?",
@@ -63,9 +81,10 @@ async def show_subjects(query) -> None:
     )
 
 async def start_study_session(query, subject) -> None:
-    """Start session with new message"""
-    user_name = query.from_user.first_name
+    """Start session (KEEP THIS MESSAGE)"""
+    await delete_previous_menu(query)
     
+    user_name = query.from_user.first_name
     user_sessions[query.from_user.id] = {
         "subject": subject,
         "user_name": user_name,
@@ -83,7 +102,9 @@ async def start_study_session(query, subject) -> None:
     )
 
 async def start_break(query) -> None:
-    """Start break with new message"""
+    """Start break (KEEP THIS MESSAGE)"""
+    await delete_previous_menu(query)
+    
     user_id = query.from_user.id
     if user_id not in user_sessions:
         await query.message.reply_text("No active study session found.")
@@ -103,7 +124,9 @@ async def start_break(query) -> None:
     )
 
 async def end_break(query) -> None:
-    """End break with new message"""
+    """End break (KEEP THIS MESSAGE)"""
+    await delete_previous_menu(query)
+    
     user_id = query.from_user.id
     if user_id not in user_sessions:
         await query.message.reply_text("No active study session found.")
@@ -124,7 +147,9 @@ async def end_break(query) -> None:
     )
 
 async def end_study_session(query) -> None:
-    """End session with new message"""
+    """End session (KEEP THIS MESSAGE)"""
+    await delete_previous_menu(query)
+    
     user_id = query.from_user.id
     if user_id not in user_sessions:
         await query.message.reply_text("No active study session found.")
@@ -134,11 +159,10 @@ async def end_study_session(query) -> None:
     subject = user_sessions[user_id]["subject"]
     del user_sessions[user_id]
     
-    keyboard = [[InlineKeyboardButton("Start Studying", callback_data="start_studying")]]
+    keyboard = [[InlineKeyboardButton("Start New Session", callback_data="start_studying")]]
     
     await query.message.reply_text(
-        f"{user_name} ended their review on {subject}. Congrats {user_name}!\n\n"
-        "Start a new session:",
+        f"{user_name} ended their review on {subject}. Congrats {user_name}!",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
