@@ -35,12 +35,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle all button clicks with new messages"""
+    """Handle all button clicks"""
     query = update.callback_query
     await query.answer()
     
     if query.data == "start_studying":
         await show_subjects(query)
+    elif query.data == "new_session":
+        await start(update, context)  # Trigger /start automatically
+        return
     elif query.data.startswith("subject_"):
         subject_index = int(query.data.split("_")[1])
         await start_study_session(query, SUBJECTS[subject_index])
@@ -124,7 +127,7 @@ async def end_break(query) -> None:
     )
 
 async def end_study_session(query) -> None:
-    """End session with new message"""
+    """End session with new message and updated button"""
     user_id = query.from_user.id
     if user_id not in user_sessions:
         await query.message.reply_text("No active study session found.")
@@ -134,11 +137,10 @@ async def end_study_session(query) -> None:
     subject = user_sessions[user_id]["subject"]
     del user_sessions[user_id]
     
-    keyboard = [[InlineKeyboardButton("Start Studying", callback_data="start_studying")]]
+    keyboard = [[InlineKeyboardButton("START A NEW SESSION", callback_data="new_session")]]
     
     await query.message.reply_text(
-        f"{user_name} ended their review on {subject}. Congrats {user_name}!\n\n"
-        "Start a new session:",
+        f"{user_name} ended their review on {subject}. Congrats {user_name}!",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
