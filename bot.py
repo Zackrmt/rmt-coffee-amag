@@ -23,7 +23,7 @@ TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 # Subjects list
 SUBJECTS = [
     "CC 🧪", "BACTE 🦠", "VIRO 👾", "MYCO 🍄", "PARA 🪱",
-    "CM 🚽💩", "HISTO �🗳️", "MT Laws ⚖️", "HEMA 🩸", "IS ⚛",
+    "CM 🚽💩", "HISTO 🧻🗳️", "MT Laws ⚖️", "HEMA 🩸", "IS ⚛",
     "BB 🩹", "MolBio 🧬", "RECALLS 🤔💭", "General Books 📚"
 ]
 
@@ -32,6 +32,11 @@ user_sessions = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send main menu when the command /start is issued."""
+    # Verify it's being used in a group topic
+    if not update.message or not update.message.chat.type in ["group", "supergroup"]:
+        await update.message.reply_text("❌ Please use this command in a group topic!")
+        return
+
     keyboard = [
         [InlineKeyboardButton("Start Studying", callback_data="start_studying")]
     ]
@@ -74,9 +79,20 @@ async def show_subjects(query) -> None:
     )
 
 async def start_study_session(query, subject) -> None:
-    """Start a new study session."""
-    topic_name = query.message.reply_to_message.forum_topic_created.name if query.message.reply_to_message and query.message.reply_to_message.forum_topic_created else "Unknown Topic"
-    
+    """Start a new study session with proper topic detection."""
+    try:
+        # Modern topic detection (Telegram API 5.0+)
+        if hasattr(query.message, 'message_thread') and query.message.message_thread:
+            topic_name = query.message.message_thread.name
+        # Legacy topic detection
+        elif query.message.reply_to_message and hasattr(query.message.reply_to_message, 'forum_topic_created'):
+            topic_name = query.message.reply_to_message.forum_topic_created.name
+        else:
+            topic_name = "General"  # Fallback name
+    except Exception as e:
+        print(f"Topic detection error: {e}")
+        topic_name = "Review Session"  # Default name
+
     user_sessions[query.from_user.id] = {
         "subject": subject,
         "topic_name": topic_name,
