@@ -1,22 +1,21 @@
 import os
 import logging
+import asyncio
 from flask import Flask, request
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 )
-import asyncio
 from collections import defaultdict
 
+# ENV variables
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 WEBHOOK_URL = os.environ["WEBHOOK_URL"]
 
-logging.basicConfig(level=logging.INFO)
+# Flask app
 app = Flask(__name__)
 
-# In-memory storage (for demo, swap with DB for production)
+# In-memory DB (Replace with persistent storage for production)
 user_sessions = defaultdict(dict)
 question_sessions = defaultdict(dict)
 question_id_counter = [1]
@@ -141,7 +140,6 @@ async def handle_studying_buttons(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    state = user_sessions[user_id].get('state')
     subject = user_sessions[user_id].get('subject', 'Subject')
 
     # Remove previous message's buttons
@@ -251,7 +249,6 @@ async def post_question(context, chat_id, qid):
         text=message_text,
         reply_markup=question_choices_keyboard(q['choices'], qid)
     )
-    # Store the question message id for later edits
     q['message_id'] = msg.message_id
 
 async def handle_question_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -284,7 +281,6 @@ async def handle_question_answer(update: Update, context: ContextTypes.DEFAULT_T
     )
 
 async def show_explanation(context, chat_id, qid, reply_msg_id):
-    import asyncio
     await asyncio.sleep(5)
     q = question_sessions[chat_id][qid]
     await context.bot.send_message(
@@ -316,7 +312,6 @@ async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def setup_bot():
     application = Application.builder().token(TOKEN).build()
-
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CallbackQueryHandler(handle_menu, pattern="^(start_studying|create_questions)$"))
     application.add_handler(CallbackQueryHandler(handle_subject_choice, pattern="^subject_"))
@@ -335,6 +330,6 @@ async def webhook():
     return "ok"
 
 if __name__ == "__main__":
-    # Set the webhook before starting Flask
+    # Set webhook before running app
     asyncio.run(telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/webhook/{TOKEN}"))
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
