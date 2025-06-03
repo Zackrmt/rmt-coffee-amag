@@ -26,41 +26,44 @@ SUBJECTS = [
 
 user_sessions = {}
 
-async def delete_entire_message(update):
+async def remove_message_and_buttons(update):
     """Delete the entire message including buttons"""
-    try:
-        if hasattr(update, 'callback_query') and update.callback_query.message:
+    if hasattr(update, 'callback_query') and update.callback_query.message:
+        try:
             await update.callback_query.message.delete()
-        elif hasattr(update, 'message') and update.message:
-            await update.message.delete()
-    except Exception as e:
-        print(f"Error deleting message: {e}")
+        except:
+            pass
 
-async def remove_buttons_only(update):
+async def remove_buttons_only(message):
     """Remove buttons but keep the message text"""
     try:
-        if hasattr(update, 'callback_query') and update.callback_query.message:
-            await update.callback_query.message.edit_reply_markup(reply_markup=None)
-    except Exception as e:
-        print(f"Error removing buttons: {e}")
+        await message.edit_reply_markup(reply_markup=None)
+    except:
+        pass
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send main menu (will be completely deleted after selection)"""
     keyboard = [[InlineKeyboardButton("Start Studying", callback_data="start_studying")]]
-    sent_msg = await update.message.reply_text(
+    message = await update.message.reply_text(
         "MAIN MENU BUTTON",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    context.user_data['menu_message_id'] = sent_msg.message_id
+    context.user_data['menu_message_id'] = message.message_id
 
 async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle all button clicks"""
     query = update.callback_query
     await query.answer()
     
-    # Delete previous MAIN MENU or SUBJECT SELECTION messages
-    if query.data == "start_studying" or query.data.startswith("subject_"):
-        await delete_entire_message(query)
+    # Remove previous menu messages if they exist
+    if 'menu_message_id' in context.user_data:
+        try:
+            await context.bot.delete_message(
+                chat_id=query.message.chat_id,
+                message_id=context.user_data['menu_message_id']
+            )
+        except:
+            pass
     
     if query.data == "start_studying":
         await show_subjects(query, context)
@@ -68,10 +71,13 @@ async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE
         subject_index = int(query.data.split("_")[1])
         await start_study_session(query, context, SUBJECTS[subject_index])
     elif query.data == "start_break":
+        await remove_buttons_only(query.message)
         await start_break(query, context)
     elif query.data == "end_break":
+        await remove_buttons_only(query.message)
         await end_break(query, context)
     elif query.data == "end_session":
+        await remove_buttons_only(query.message)
         await end_study_session(query, context)
 
 async def show_subjects(query, context) -> None:
@@ -86,14 +92,14 @@ async def show_subjects(query, context) -> None:
     if len(SUBJECTS) % 2 != 0:
         keyboard.append([InlineKeyboardButton(SUBJECTS[-1], callback_data=f"subject_{len(SUBJECTS)-1}")])
     
-    sent_msg = await query.message.reply_text(
+    message = await query.message.reply_text(
         "What subject?",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    context.user_data['subject_message_id'] = sent_msg.message_id
+    context.user_data['menu_message_id'] = message.message_id
 
 async def start_study_session(query, context, subject) -> None:
-    """Start session (KEEP MESSAGE, REMOVE BUTTONS AFTER CLICK)"""
+    """Start session (KEEP MESSAGE, BUTTONS STAY UNTIL CLICKED)"""
     user_name = query.from_user.first_name
     user_sessions[query.from_user.id] = {
         "subject": subject,
@@ -106,14 +112,13 @@ async def start_study_session(query, context, subject) -> None:
         [InlineKeyboardButton("END STUDY SESSION", callback_data="end_session")]
     ]
     
-    sent_message = await query.message.reply_text(
+    await query.message.reply_text(
         f"{user_name} started studying {subject}.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    context.user_data['last_study_message'] = sent_message.message_id
 
 async def start_break(query, context) -> None:
-    """Start break (KEEP MESSAGE, REMOVE BUTTONS AFTER CLICK)"""
+    """Start break (KEEP MESSAGE, BUTTONS STAY UNTIL CLICKED)"""
     user_id = query.from_user.id
     if user_id not in user_sessions:
         await query.message.reply_text("No active study session found.")
@@ -127,15 +132,13 @@ async def start_break(query, context) -> None:
         [InlineKeyboardButton("END STUDY SESSION", callback_data="end_session")]
     ]
     
-    sent_message = await query.message.reply_text(
+    await query.message.reply_text(
         f"{user_name} started a break. Break responsibly, {user_name}!",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    context.user_data['last_break_message'] = sent_message.message_id
-    await remove_buttons_only({'callback_query': query})
 
 async def end_break(query, context) -> None:
-    """End break (KEEP MESSAGE, REMOVE BUTTONS AFTER CLICK)"""
+    """End break (KEEP MESSAGE, BUTTONS STAY UNTIL CLICKED)"""
     user_id = query.from_user.id
     if user_id not in user_sessions:
         await query.message.reply_text("No active study session found.")
@@ -150,15 +153,13 @@ async def end_break(query, context) -> None:
         [InlineKeyboardButton("END STUDY SESSION", callback_data="end_session")]
     ]
     
-    sent_message = await query.message.reply_text(
+    await query.message.reply_text(
         f"{user_name} ended their break and resumed studying {subject}.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    context.user_data['last_resume_message'] = sent_message.message_id
-    await remove_buttons_only({'callback_query': query})
 
 async def end_study_session(query, context) -> None:
-    """End session (KEEP MESSAGE, REMOVE BUTTONS AFTER CLICK)"""
+    """End session (KEEP MESSAGE, BUTTONS STAY UNTIL CLICKED)"""
     user_id = query.from_user.id
     if user_id not in user_sessions:
         await query.message.reply_text("No active study session found.")
@@ -170,12 +171,10 @@ async def end_study_session(query, context) -> None:
     
     keyboard = [[InlineKeyboardButton("Start New Session", callback_data="start_studying")]]
     
-    sent_message = await query.message.reply_text(
+    await query.message.reply_text(
         f"{user_name} ended their review on {subject}. Congrats {user_name}!",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    context.user_data['last_end_message'] = sent_message.message_id
-    await remove_buttons_only({'callback_query': query})
 
 def main() -> None:
     """Start the bot"""
