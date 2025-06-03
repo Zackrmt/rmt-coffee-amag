@@ -7,10 +7,11 @@ from telegram import (
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 )
+import asyncio
 from collections import defaultdict
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-WEBHOOK_URL = os.environ["WEBHOOK_URL"]  # set to your Render public URL
+WEBHOOK_URL = os.environ["WEBHOOK_URL"]
 
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
@@ -78,12 +79,6 @@ def question_choices_keyboard(choices, qid):
         [InlineKeyboardButton(choice, callback_data=f"answer_{qid}_{idx}")]
         for idx, choice in enumerate(choices)
     ])
-
-# ---- STATE KEYS for user_sessions ----
-# 'state': None | 'choosing_subject' | 'studying' | 'on_break' | 'creating_question' | ...
-# 'subject': subject key
-# 'question_step': None | 'ask_text' | 'ask_choices' | 'ask_correct' | 'ask_explanation'
-# 'question_data': dict
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_sessions[update.effective_user.id].clear()
@@ -285,14 +280,9 @@ async def handle_question_answer(update: Update, context: ContextTypes.DEFAULT_T
     # Send result message
     msg = await query.message.reply_text(reply)
     # After 5s, show explanation and a "Done Reading" button
-    if not is_correct:
-        await context.application.create_task(
-            show_explanation(context, chat_id, qid, msg.message_id)
-        )
-    else:
-        await context.application.create_task(
-            show_explanation(context, chat_id, qid, msg.message_id)
-        )
+    await context.application.create_task(
+        show_explanation(context, chat_id, qid, msg.message_id)
+    )
 
 async def show_explanation(context, chat_id, qid, reply_msg_id):
     import asyncio
@@ -311,7 +301,6 @@ async def handle_done_reading(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Reshow the question (so others can answer, and answers are not visible)
     for qid, q in question_sessions[chat_id].items():
         if 'message_id' in q:
-            # Repost the question
             await post_question(context, chat_id, qid)
             break
     # Remove the done reading button
@@ -340,20 +329,18 @@ def setup_bot():
 
 telegram_app = setup_bot()
 
+# Set webhook ONCE at startup (async)
+@app.before_first_request
+def set_webhook():
+    asyncio.get_event_loop().create_task(
+        telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/webhook/{TOKEN}")
+    )
+
 @app.route(f"/webhook/{TOKEN}", methods=["POST"])
-def webhook():
+async def webhook():
     update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    telegram_app.update_queue.put(update)
+    await telegram_app.process_update(update)
     return "ok"
 
 if __name__ == "__main__":
-    import asyncio
-    # Set webhook
-    from telegram import Bot
-    bot = Bot(TOKEN)
-    asyncio.run(bot.set_webhook(f"{WEBHOOK_URL}/webhook/{TOKEN}"))
-    telegram_app.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000)),
-        webhook_url=f"{WEBHOOK_URL}/webhook/{TOKEN}"
-    )
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
