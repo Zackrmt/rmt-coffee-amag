@@ -23,7 +23,7 @@ TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 # Subjects list
 SUBJECTS = [
     "CC 🧪", "BACTE 🦠", "VIRO 👾", "MYCO 🍄", "PARA 🪱",
-    "CM 🚽💩", "HISTO 🧻🗳️", "MT Laws ⚖️", "HEMA 🩸", "IS ⚛",
+    "CM 🚽💩", "HISTO �🗳️", "MT Laws ⚖️", "HEMA 🩸", "IS ⚛",
     "BB 🩹", "MolBio 🧬", "RECALLS 🤔💭", "General Books 📚"
 ]
 
