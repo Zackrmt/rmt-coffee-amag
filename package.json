@@ -1,22 +1,17 @@
 {
-  "name": "study-bot",
-  "version": "1.0.0",
-  "description": "Telegram bot for study logging and quiz management",
-  "main": "src/bot.js",
-  "scripts": {
-    "start": "node src/bot.js",
-    "dev": "nodemon src/bot.js"
-  },
-  "author": "Zackrmt",
-  "created": "2025-06-04 02:25:26 UTC",
-  "dependencies": {
-    "dotenv": "^16.0.3",
-    "node-telegram-bot-api": "^0.61.0"
-  },
-  "devDependencies": {
-    "nodemon": "^2.0.22"
-  },
-  "engines": {
-    "node": ">=16.0.0"
-  }
+    "name": "rmt-coffee-amag",
+    "version": "1.0.0",
+    "description": "RMT Coffee Study Logger",
+    "main": "index.js",
+    "scripts": {
+        "start": "node index.js",
+        "dev": "nodemon index.js"
+    },
+    "author": "Zackrmt",
+    "license": "MIT",
+    "dependencies": {
+        "canvas": "^2.11.0",
+        "node-telegram-bot-api": "^0.61.0",
+        "moment": "^2.29.4"
+    }
 }
