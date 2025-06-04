@@ -1,2 +1,0 @@
-python-telegram-bot==20.7
-Flask[async]==3.0.3
