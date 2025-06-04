@@ -1,7 +1,7 @@
 /**
  * handlers.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 03:53:24 UTC
+ * Created at: 2025-06-04 04:07:28 UTC
  */
 
 const { mainMenuButtons, subjectButtons, studySessionButtons, breakButtons, questionCreationCancelButton } = require('./buttons');
@@ -74,6 +74,51 @@ async function handleCallback(callbackQuery, bot) {
     const createMessageOptions = (baseOptions = {}) => {
         return messageThreadId ? { ...baseOptions, message_thread_id: messageThreadId } : baseOptions;
     };
+
+    // Handle START_STUDYING with message deletion
+    if (data.startsWith(`${ACTIONS.START_STUDYING}:`)) {
+        const [action, messageToDeleteId] = data.split(':');
+        try {
+            // Delete the "click button below" message
+            await bot.deleteMessage(msg.chat.id, msg.message_id);
+        } catch (error) {
+            console.error('Error deleting message:', error);
+        }
+
+        // Continue with the regular START_STUDYING logic
+        if (sessionManager.lastMenuMessage) {
+            try {
+                await bot.deleteMessage(
+                    sessionManager.lastMenuMessage.chatId,
+                    sessionManager.lastMenuMessage.messageId
+                );
+            } catch (error) {
+                console.error('Error deleting menu message:', error);
+            }
+        }
+        
+        const subjectMessage = await bot.sendMessage(
+            msg.chat.id, 
+            'What subject?', 
+            createMessageOptions({
+                ...subjectButtons,
+                reply_markup: {
+                    ...subjectButtons.reply_markup,
+                    inline_keyboard: [
+                        ...subjectButtons.reply_markup.inline_keyboard.slice(0, -1),
+                        [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_STUDYING }]
+                    ]
+                }
+            })
+        );
+        
+        sessionManager.lastSubjectMessage = {
+            chatId: msg.chat.id,
+            messageId: subjectMessage.message_id,
+            messageThreadId
+        };
+        return;
+    }
 
     if (data.startsWith('answer:')) {
         await quiz.handleAnswer(callbackQuery, bot);
@@ -256,7 +301,7 @@ async function handleCallback(callbackQuery, bot) {
             sessionManager.updateSessionStatus(userId, 'break');
             await bot.sendMessage(
                 msg.chat.id,
-                `${userName} started a break. Break Responsibly, ${userName}!`,
+                `${userName} started their break.`,
                 createMessageOptions(breakButtons)
             );
             break;
@@ -291,17 +336,28 @@ async function handleCallback(callbackQuery, bot) {
             
             const session = sessionManager.getSession(userId);
             if (session) {
+                // Send first message
                 await bot.sendMessage(
                     msg.chat.id,
-                    `${userName} ended their review on ${session.subject}. Congrats ${userName}. If you want to start a study session again, just click the button below`,
-                    createMessageOptions({
-                        reply_markup: {
-                            inline_keyboard: [[
-                                { text: '📚 Start Studying', callback_data: ACTIONS.START_STUDYING }
-                            ]]
-                        }
-                    })
+                    `${userName} ended their review on ${session.subject}. Congrats ${userName}.`,
+                    createMessageOptions({})
                 );
+
+                // Send second message after 3 seconds
+                setTimeout(async () => {
+                    const secondMsg = await bot.sendMessage(
+                        msg.chat.id,
+                        'If you want to start a study session again, just click the button below',
+                        createMessageOptions({
+                            reply_markup: {
+                                inline_keyboard: [[
+                                    { text: '📚 Start Studying', callback_data: `${ACTIONS.START_STUDYING}:${msg.message_id}` }
+                                ]]
+                            }
+                        })
+                    );
+                }, 3000);
+
                 sessionManager.endSession(userId);
             }
             break;
@@ -378,11 +434,20 @@ async function handleCallback(callbackQuery, bot) {
                 }
             }
 
-            await bot.sendMessage(
+            const cancelStudyMsg = await bot.sendMessage(
                 msg.chat.id,
                 'Studying was mistakenly clicked. Session CANCELLED.',
                 createMessageOptions(mainMenuButtons)
             );
+
+            // Delete the cancellation message after 5 seconds
+            setTimeout(async () => {
+                try {
+                    await bot.deleteMessage(msg.chat.id, cancelStudyMsg.message_id);
+                } catch (error) {
+                    console.error('Error deleting cancellation message:', error);
+                }
+            }, 5000);
             break;
 
         default:
