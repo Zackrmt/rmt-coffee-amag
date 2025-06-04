@@ -1,3 +1,11 @@
+/**
+ * quiz.js
+ * Created by: Zackrmt
+ * Created at: 2025-06-04 02:41:25 UTC
+ */
+
+const { questionCreationCancelButton } = require('./buttons');
+
 class Quiz {
     constructor() {
         this.questions = new Map();
@@ -31,25 +39,6 @@ class Quiz {
         };
 
         switch (userState.state) {
-            case 'WAITING_SUBJECT':
-                const subject = msg.text;
-                if (!Object.values(require('./constants').SUBJECTS).includes(subject)) {
-                    await bot.sendMessage(
-                        msg.chat.id,
-                        'Please select a valid subject from the list.',
-                        messageOptions(questionCreationCancelButton)
-                    );
-                    return true;
-                }
-                userState.questionData.subject = subject;
-                userState.state = 'WAITING_QUESTION';
-                await bot.sendMessage(
-                    msg.chat.id,
-                    'Please enter your question:',
-                    messageOptions(questionCreationCancelButton)
-                );
-                return true;
-
             case 'WAITING_QUESTION':
                 userState.questionData.question = msg.text;
                 userState.state = 'WAITING_CHOICES';
@@ -93,7 +82,7 @@ class Quiz {
                 userState.state = 'WAITING_EXPLANATION';
                 await bot.sendMessage(
                     msg.chat.id,
-                    'Please provide the explanation for the correct answer',
+                    'Please explain why this is the correct answer:',
                     messageOptions(questionCreationCancelButton)
                 );
                 return true;
@@ -105,7 +94,6 @@ class Quiz {
                     explanation: msg.text,
                     creatorId: msg.from.id,
                     creatorName: msg.from.first_name || `User${msg.from.id}`,
-                    subject: userState.questionData.subject,
                     id: questionId,
                     createdAt: new Date().toISOString(),
                     messageThreadId
@@ -132,22 +120,24 @@ class Quiz {
     }
 
     createQuizMessage(questionData) {
-        let message = `<b>${questionData.question}</b>\n\n`;
+        let message = `<b>Subject: ${questionData.subject}</b>\n\n`;
+        message += `<b>${questionData.question}</b>\n\n`;
         questionData.choices.forEach(choice => {
             message += `${choice}\n`;
         });
-        message += `\nSubject: ${questionData.subject}`;
-        message += `\nQuestion created by ${questionData.creatorName} (ID: ${questionData.creatorId})`;
+        message += `\nQuestion created by ${questionData.creatorName}`;
         return message;
     }
 
     createAnswerKeyboard(questionId, creatorId) {
-        return {
+        const choices = ['a', 'b', 'c', 'd', 'e'].map(letter => ({
+            text: letter.toUpperCase(),
+            callback_data: `answer:${questionId}:${letter}`
+        }));
+
+        const keyboard = {
             inline_keyboard: [
-                ['a', 'b', 'c', 'd', 'e'].map(letter => ({
-                    text: letter.toUpperCase(),
-                    callback_data: `answer:${questionId}:${letter}`
-                })),
+                choices,
                 creatorId ? [
                     {
                         text: '🗑️ Delete Question',
@@ -156,6 +146,8 @@ class Quiz {
                 ] : []
             ].filter(row => row.length > 0)
         };
+
+        return keyboard;
     }
 
     async handleAnswer(callbackQuery, bot) {
@@ -166,9 +158,7 @@ class Quiz {
         if (!question) return;
 
         const isCorrect = answer === question.correctAnswer;
-        const responseMessage = isCorrect ? 
-            '✅ Correct!' : 
-            `❌ Wrong! The correct answer is ${question.correctAnswer.toUpperCase()}`;
+        const responseMessage = isCorrect ? '✅ Correct!' : '❌ Wrong!';
 
         await bot.answerCallbackQuery(callbackQuery.id, {
             text: responseMessage,
@@ -177,13 +167,17 @@ class Quiz {
 
         if (!isCorrect) {
             setTimeout(async () => {
+                const correctChoice = question.choices.find(choice => 
+                    choice.toLowerCase().startsWith(question.correctAnswer.toLowerCase())
+                );
+                
                 const options = messageThreadId ? 
                     { message_thread_id: messageThreadId, parse_mode: 'HTML' } : 
                     { parse_mode: 'HTML' };
                 
                 await bot.sendMessage(
                     callbackQuery.message.chat.id,
-                    `<b>Explanation:</b>\n${question.explanation}`,
+                    `<b>The correct answer is:</b>\n${correctChoice}\n\n<b>Explanation:</b>\n${question.explanation}`,
                     {
                         ...options,
                         reply_markup: {
@@ -193,7 +187,7 @@ class Quiz {
                         }
                     }
                 );
-            }, 5000);
+            }, 3000); // Show correct answer after 3 seconds
         }
     }
 
