@@ -1,10 +1,10 @@
 /**
  * quiz.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 02:41:25 UTC
+ * Created at: 2025-06-04 03:02:18 UTC
  */
 
-const { questionCreationCancelButton } = require('./buttons');
+const { mainMenuButtons, questionCreationCancelButton } = require('./buttons');
 
 class Quiz {
     constructor() {
@@ -27,26 +27,61 @@ class Quiz {
 
         if (!userState) return false;
 
-        // Delete the user's message immediately
-        try {
-            await bot.deleteMessage(msg.chat.id, msg.message_id);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-        }
-
         const messageOptions = (options) => {
             return messageThreadId ? { ...options, message_thread_id: messageThreadId } : options;
         };
 
-        switch (userState.state) {
-            case 'WAITING_QUESTION':
-                userState.questionData.question = msg.text;
+        // Handle image upload
+        if (msg.photo && userState.state === 'WAITING_QUESTION') {
+            userState.questionData.image = {
+                file_id: msg.photo[msg.photo.length - 1].file_id,
+                caption: msg.caption || ''
+            };
+            
+            if (msg.caption) {
+                userState.questionData.question = msg.caption;
                 userState.state = 'WAITING_CHOICES';
                 await bot.sendMessage(
                     msg.chat.id,
                     'Please enter the choices (one per line) in format:\na) Choice 1\nb) Choice 2\nc) Choice 3\nd) Choice 4\ne) Choice 5',
                     messageOptions(questionCreationCancelButton)
                 );
+            } else {
+                await bot.sendMessage(
+                    msg.chat.id,
+                    'Image received! Now, please type your question:',
+                    messageOptions(questionCreationCancelButton)
+                );
+            }
+            return true;
+        }
+
+        // Delete text messages immediately
+        if (!msg.photo) {
+            try {
+                await bot.deleteMessage(msg.chat.id, msg.message_id);
+            } catch (error) {
+                console.error('Error deleting message:', error);
+            }
+        }
+
+        switch (userState.state) {
+            case 'WAITING_QUESTION':
+                if (msg.text) {
+                    userState.questionData.question = msg.text;
+                    userState.state = 'WAITING_CHOICES';
+                    await bot.sendMessage(
+                        msg.chat.id,
+                        'Please enter the choices (one per line) in format:\na) Choice 1\nb) Choice 2\nc) Choice 3\nd) Choice 4\ne) Choice 5',
+                        messageOptions(questionCreationCancelButton)
+                    );
+                } else if (!msg.photo) {
+                    await bot.sendMessage(
+                        msg.chat.id,
+                        'You can either:\n1. Type your question directly, or\n2. Send an image with your question in the caption',
+                        messageOptions(questionCreationCancelButton)
+                    );
+                }
                 return true;
 
             case 'WAITING_CHOICES':
@@ -101,22 +136,30 @@ class Quiz {
                 this.questions.set(questionId, questionData);
                 this.userState.delete(userId);
                 
-                // Create the quiz message
-                const quizMessage = this.createQuizMessage(questionData);
-                const keyboard = this.createAnswerKeyboard(questionId, msg.from.id);
-                
-                await bot.sendMessage(
-                    msg.chat.id,
-                    quizMessage,
-                    messageOptions({
-                        reply_markup: keyboard,
-                        parse_mode: 'HTML'
-                    })
-                );
+                // Create and send the quiz message with image if exists
+                await this.sendQuizMessage(questionData, msg.chat.id, bot, messageThreadId);
                 return true;
         }
 
         return false;
+    }
+
+    async sendQuizMessage(questionData, chatId, bot, messageThreadId) {
+        const messageOptions = {
+            parse_mode: 'HTML',
+            reply_markup: this.createAnswerKeyboard(questionData.id, questionData.creatorId)
+        };
+
+        if (messageThreadId) {
+            messageOptions.message_thread_id = messageThreadId;
+        }
+
+        if (questionData.image) {
+            messageOptions.caption = this.createQuizMessage(questionData);
+            await bot.sendPhoto(chatId, questionData.image.file_id, messageOptions);
+        } else {
+            await bot.sendMessage(chatId, this.createQuizMessage(questionData), messageOptions);
+        }
     }
 
     createQuizMessage(questionData) {
@@ -141,13 +184,75 @@ class Quiz {
                 creatorId ? [
                     {
                         text: '🗑️ Delete Question',
-                        callback_data: `delete_question:${questionId}`
+                        callback_data: `delete_confirm_1:${questionId}`
                     }
                 ] : []
             ].filter(row => row.length > 0)
         };
 
         return keyboard;
+    }
+
+    createDeleteConfirmation1Keyboard(questionId) {
+        return {
+            inline_keyboard: [
+                [
+                    { text: 'Yes', callback_data: `delete_confirm_2:${questionId}` },
+                    { text: 'No', callback_data: `delete_cancel:${questionId}` }
+                ]
+            ]
+        };
+    }
+
+    createDeleteConfirmation2Keyboard(questionId) {
+        return {
+            inline_keyboard: [
+                [
+                    { text: 'YES, I AM SURE', callback_data: `delete_question:${questionId}` },
+                    { text: 'NO', callback_data: `delete_cancel:${questionId}` }
+                ]
+            ]
+        };
+    }
+
+    async handleDeleteConfirmation1(questionId, userId, chatId, bot, messageThreadId) {
+        const question = this.questions.get(questionId);
+        if (!question || question.creatorId !== userId) return false;
+
+        const options = messageThreadId ? { message_thread_id: messageThreadId } : {};
+        await bot.sendMessage(
+            chatId,
+            'Are you sure you want to delete this question?',
+            {
+                ...options,
+                reply_markup: this.createDeleteConfirmation1Keyboard(questionId)
+            }
+        );
+        return true;
+    }
+
+    async handleDeleteConfirmation2(questionId, userId, chatId, bot, messageThreadId) {
+        const question = this.questions.get(questionId);
+        if (!question || question.creatorId !== userId) return false;
+
+        const options = messageThreadId ? { message_thread_id: messageThreadId } : {};
+        await bot.sendMessage(
+            chatId,
+            'REALLY? Are you sure?',
+            {
+                ...options,
+                reply_markup: this.createDeleteConfirmation2Keyboard(questionId)
+            }
+        );
+        return true;
+    }
+
+    async handleDeleteCancel(questionId, userId, chatId, bot, messageThreadId) {
+        const question = this.questions.get(questionId);
+        if (!question) return false;
+        
+        await this.sendQuizMessage(question, chatId, bot, messageThreadId);
+        return true;
     }
 
     async handleAnswer(callbackQuery, bot) {
@@ -165,19 +270,43 @@ class Quiz {
             show_alert: true
         });
 
-        if (!isCorrect) {
-            setTimeout(async () => {
-                const correctChoice = question.choices.find(choice => 
-                    choice.toLowerCase().startsWith(question.correctAnswer.toLowerCase())
-                );
-                
-                const options = messageThreadId ? 
-                    { message_thread_id: messageThreadId, parse_mode: 'HTML' } : 
-                    { parse_mode: 'HTML' };
-                
+        // Always show explanation after 3 seconds, regardless of correct/incorrect
+        setTimeout(async () => {
+            const correctChoice = question.choices.find(choice => 
+                choice.toLowerCase().startsWith(question.correctAnswer.toLowerCase())
+            );
+            
+            const options = messageThreadId ? 
+                { message_thread_id: messageThreadId, parse_mode: 'HTML' } : 
+                { parse_mode: 'HTML' };
+            
+            const explanationMessage = isCorrect ?
+                `✅ <b>Correct!</b>\n\n<b>Explanation:</b>\n${question.explanation}` :
+                `❌ <b>The correct answer is:</b>\n${correctChoice}\n\n<b>Explanation:</b>\n${question.explanation}`;
+            
+            try {
+                // Delete the original question message
+                await bot.deleteMessage(callbackQuery.message.chat.id, callbackQuery.message.message_id);
+            } catch (error) {
+                console.error('Error deleting original message:', error);
+            }
+
+            // Send the explanation with the question
+            if (question.image) {
+                const messageOptions = {
+                    ...options,
+                    caption: this.createQuizMessage(question) + '\n\n' + explanationMessage,
+                    reply_markup: {
+                        inline_keyboard: [[
+                            { text: 'Done Reading', callback_data: `done:${questionId}` }
+                        ]]
+                    }
+                };
+                await bot.sendPhoto(callbackQuery.message.chat.id, question.image.file_id, messageOptions);
+            } else {
                 await bot.sendMessage(
                     callbackQuery.message.chat.id,
-                    `<b>The correct answer is:</b>\n${correctChoice}\n\n<b>Explanation:</b>\n${question.explanation}`,
+                    this.createQuizMessage(question) + '\n\n' + explanationMessage,
                     {
                         ...options,
                         reply_markup: {
@@ -187,7 +316,16 @@ class Quiz {
                         }
                     }
                 );
-            }, 3000); // Show correct answer after 3 seconds
+            }
+        }, 3000);
+    }
+
+    async handleDoneReading(questionId, chatId, messageId, bot, messageThreadId) {
+        try {
+            // Delete the explanation message
+            await bot.deleteMessage(chatId, messageId);
+        } catch (error) {
+            console.error('Error deleting explanation message:', error);
         }
     }
 
@@ -196,7 +334,14 @@ class Quiz {
         if (question && question.creatorId === userId) {
             this.questions.delete(questionId);
             const options = messageThreadId ? { message_thread_id: messageThreadId } : {};
-            await bot.sendMessage(chatId, 'Question has been deleted.', options);
+            await bot.sendMessage(
+                chatId, 
+                'Question has been deleted.',
+                {
+                    ...options,
+                    reply_markup: mainMenuButtons.reply_markup
+                }
+            );
             return true;
         }
         return false;
