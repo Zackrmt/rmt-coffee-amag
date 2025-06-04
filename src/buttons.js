@@ -1,11 +1,19 @@
-const { SUBJECTS, ACTIONS } = require('./constants');
+/**
+ * buttons.js
+ * Created by: Zackrmt
+ * Created at: 2025-06-04 13:38:04 UTC
+ */
+
+const { ACTIONS } = require('./constants');
 
 const mainMenuButtons = {
     reply_markup: {
         inline_keyboard: [
             [
-                { text: 'Start Studying 📖', callback_data: ACTIONS.START_STUDYING },
-                { text: 'Start Creating Questions 🤔💡', callback_data: ACTIONS.CREATE_QUESTION }
+                { text: '📚 Start Studying', callback_data: ACTIONS.START_STUDYING }
+            ],
+            [
+                { text: '➕ Create Question', callback_data: ACTIONS.CREATE_QUESTION }
             ]
         ]
     }
@@ -14,10 +22,18 @@ const mainMenuButtons = {
 const subjectButtons = {
     reply_markup: {
         inline_keyboard: [
-            ...Object.entries(SUBJECTS).map(([_, subject]) => [
-                { text: subject, callback_data: `${ACTIONS.SELECT_SUBJECT}:${subject}` }
-            ]),
-            [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_STUDYING }]
+            [
+                { text: '📐 Mathematics', callback_data: `${ACTIONS.SELECT_SUBJECT}:Mathematics` },
+                { text: '🔬 Science', callback_data: `${ACTIONS.SELECT_SUBJECT}:Science` }
+            ],
+            [
+                { text: '📚 English', callback_data: `${ACTIONS.SELECT_SUBJECT}:English` },
+                { text: '🌏 Social Studies', callback_data: `${ACTIONS.SELECT_SUBJECT}:Social Studies` }
+            ],
+            [
+                { text: '💻 Computer', callback_data: `${ACTIONS.SELECT_SUBJECT}:Computer` },
+                { text: '📝 Professional Education', callback_data: `${ACTIONS.SELECT_SUBJECT}:Professional Education` }
+            ]
         ]
     }
 };
@@ -26,8 +42,10 @@ const studySessionButtons = {
     reply_markup: {
         inline_keyboard: [
             [
-                { text: 'START BREAK', callback_data: ACTIONS.START_BREAK },
-                { text: 'END STUDY SESSION', callback_data: ACTIONS.END_SESSION }
+                { text: '⏸️ Start Break', callback_data: ACTIONS.START_BREAK }
+            ],
+            [
+                { text: '⏹️ End Session', callback_data: ACTIONS.END_SESSION }
             ]
         ]
     }
@@ -37,8 +55,10 @@ const breakButtons = {
     reply_markup: {
         inline_keyboard: [
             [
-                { text: 'END BREAK', callback_data: ACTIONS.END_BREAK },
-                { text: 'END STUDY SESSION', callback_data: ACTIONS.END_SESSION }
+                { text: '▶️ End Break', callback_data: ACTIONS.END_BREAK }
+            ],
+            [
+                { text: '⏹️ End Session', callback_data: ACTIONS.END_SESSION }
             ]
         ]
     }
@@ -47,7 +67,9 @@ const breakButtons = {
 const questionCreationCancelButton = {
     reply_markup: {
         inline_keyboard: [
-            [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_QUESTION }]
+            [
+                { text: '❌ Cancel', callback_data: ACTIONS.CANCEL_QUESTION }
+            ]
         ]
     }
 };
