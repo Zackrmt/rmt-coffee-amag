@@ -1,7 +1,7 @@
 /**
  * quiz.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 03:30:52 UTC
+ * Created at: 2025-06-04 04:32:31 UTC
  */
 
 const { mainMenuButtons, questionCreationCancelButton } = require('./buttons');
@@ -79,7 +79,9 @@ class Quiz {
         if (!userState) return false;
 
         const messageOptions = (options) => {
-            return messageThreadId ? { ...options, message_thread_id: messageThreadId } : options;
+            return messageThreadId ? 
+                { ...options, message_thread_id: messageThreadId, disable_notification: true } : 
+                { ...options, disable_notification: true };
         };
 
         // Add message to temp list for cleanup
@@ -395,7 +397,7 @@ class Quiz {
             show_alert: true
         });
 
-        // Always show explanation after 3 seconds, regardless of correct/incorrect
+        // Show explanation after 3 seconds, but keep the original question
         setTimeout(async () => {
             const correctChoice = question.choices.find(choice => 
                 choice.toLowerCase().startsWith(question.correctAnswer.toLowerCase())
@@ -409,45 +411,28 @@ class Quiz {
                 `✅ <b>Correct!</b>\n\n<b>Explanation:</b>\n${question.explanation}` :
                 `❌ <b>The correct answer is:</b>\n${correctChoice}\n\n<b>Explanation:</b>\n${question.explanation}`;
             
-            try {
-                // Delete the original question message
-                await bot.deleteMessage(callbackQuery.message.chat.id, callbackQuery.message.message_id);
-            } catch (error) {
-                console.error('Error deleting original message:', error);
-            }
-
-            // Send the explanation with the question
-            if (question.image) {
-                const messageOptions = {
+            // Send explanation as a separate message
+            const explanationMsg = await bot.sendMessage(
+                callbackQuery.message.chat.id,
+                explanationMessage,
+                {
                     ...options,
-                    caption: this.createQuizMessage(question) + '\n\n' + explanationMessage,
                     reply_markup: {
                         inline_keyboard: [[
                             { text: 'Done Reading', callback_data: `done:${questionId}` }
                         ]]
                     }
-                };
-                await bot.sendPhoto(callbackQuery.message.chat.id, question.image.file_id, messageOptions);
-            } else {
-                await bot.sendMessage(
-                    callbackQuery.message.chat.id,
-                    this.createQuizMessage(question) + '\n\n' + explanationMessage,
-                    {
-                        ...options,
-                        reply_markup: {
-                            inline_keyboard: [[
-                                { text: 'Done Reading', callback_data: `done:${questionId}` }
-                            ]]
-                        }
-                    }
-                );
-            }
+                }
+            );
+
+            // Only delete the explanation message when clicking "Done Reading"
+            // The original question message stays
         }, 3000);
     }
 
     async handleDoneReading(questionId, chatId, messageId, bot, messageThreadId) {
         try {
-            // Delete the explanation message
+            // Only delete the explanation message
             await bot.deleteMessage(chatId, messageId);
         } catch (error) {
             console.error('Error deleting explanation message:', error);
@@ -493,8 +478,8 @@ class Quiz {
             `Please enter the correct answer (${Array.from({ length: userState.questionData.choices.length }, 
                 (_, i) => String.fromCharCode(97 + i)).join(', ')}):`,
             messageThreadId ? 
-                { message_thread_id: messageThreadId, ...questionCreationCancelButton } : 
-                questionCreationCancelButton
+                { message_thread_id: messageThreadId, ...questionCreationCancelButton, disable_notification: true } : 
+                { ...questionCreationCancelButton, disable_notification: true }
         );
         await this.addTempMessage(userId, botMsg.message_id);
         return true;
@@ -511,8 +496,8 @@ class Quiz {
             chatId,
             'Enter each choice on a new line (2-5 choices):',
             messageThreadId ? 
-                { message_thread_id: messageThreadId, ...questionCreationCancelButton } : 
-                questionCreationCancelButton
+                { message_thread_id: messageThreadId, ...questionCreationCancelButton, disable_notification: true } : 
+                { ...questionCreationCancelButton, disable_notification: true }
         );
         await this.addTempMessage(userId, botMsg.message_id);
         return true;
@@ -530,8 +515,8 @@ class Quiz {
             chatId,
             'Please explain why this is the correct answer:',
             messageThreadId ? 
-                { message_thread_id: messageThreadId, ...questionCreationCancelButton } : 
-                questionCreationCancelButton
+                { message_thread_id: messageThreadId, ...questionCreationCancelButton, disable_notification: true } : 
+                { ...questionCreationCancelButton, disable_notification: true }
         );
         await this.addTempMessage(userId, botMsg.message_id);
         return true;
@@ -549,8 +534,8 @@ class Quiz {
             `Please enter the correct answer (${Array.from({ length: userState.questionData.choices.length }, 
                 (_, i) => String.fromCharCode(97 + i)).join(', ')}):`,
             messageThreadId ? 
-                { message_thread_id: messageThreadId, ...questionCreationCancelButton } : 
-                questionCreationCancelButton
+                { message_thread_id: messageThreadId, ...questionCreationCancelButton, disable_notification: true } : 
+                { ...questionCreationCancelButton, disable_notification: true }
         );
         await this.addTempMessage(userId, botMsg.message_id);
         return true;
