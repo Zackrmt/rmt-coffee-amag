@@ -22,7 +22,7 @@ logging.basicConfig(
 
 # Add specific user and time information
 CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-04 17:26:40"
+STARTUP_TIME = "2025-06-04 17:30:13"
 
 logger = logging.getLogger(__name__)
 
