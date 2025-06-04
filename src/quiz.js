@@ -1,7 +1,7 @@
 /**
  * quiz.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 03:02:18 UTC
+ * Created at: 2025-06-04 03:10:20 UTC
  */
 
 const { mainMenuButtons, questionCreationCancelButton } = require('./buttons');
@@ -181,6 +181,9 @@ class Quiz {
         const keyboard = {
             inline_keyboard: [
                 choices,
+                [
+                    { text: '➕ Add New Question', callback_data: `add_confirm:${questionId}` }
+                ],
                 creatorId ? [
                     {
                         text: '🗑️ Delete Question',
@@ -191,6 +194,17 @@ class Quiz {
         };
 
         return keyboard;
+    }
+
+    createAddConfirmationKeyboard(questionId) {
+        return {
+            inline_keyboard: [
+                [
+                    { text: 'Yes', callback_data: 'start_new_question' },
+                    { text: 'No', callback_data: `add_cancel:${questionId}` }
+                ]
+            ]
+        };
     }
 
     createDeleteConfirmation1Keyboard(questionId) {
@@ -213,6 +227,31 @@ class Quiz {
                 ]
             ]
         };
+    }
+
+    async handleAddConfirmation(questionId, chatId, bot, messageThreadId) {
+        const question = this.questions.get(questionId);
+        if (!question) return false;
+
+        const options = messageThreadId ? { message_thread_id: messageThreadId } : {};
+        await bot.sendMessage(
+            chatId,
+            'Do you want to add a new question?',
+            {
+                ...options,
+                reply_markup: this.createAddConfirmationKeyboard(questionId)
+            }
+        );
+        return true;
+    }
+
+    async handleAddCancel(questionId, chatId, messageId, bot, messageThreadId) {
+        try {
+            // Delete the confirmation message
+            await bot.deleteMessage(chatId, messageId);
+        } catch (error) {
+            console.error('Error deleting confirmation message:', error);
+        }
     }
 
     async handleDeleteConfirmation1(questionId, userId, chatId, bot, messageThreadId) {
