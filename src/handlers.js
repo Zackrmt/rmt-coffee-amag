@@ -1,3 +1,9 @@
+/**
+ * handlers.js
+ * Created by: Zackrmt
+ * Created at: 2025-06-04 02:39:29 UTC
+ */
+
 const { mainMenuButtons, subjectButtons, studySessionButtons, breakButtons, questionCreationCancelButton } = require('./buttons');
 const { ACTIONS } = require('./constants');
 const quiz = require('./quiz');
@@ -116,7 +122,16 @@ async function handleCallback(callbackQuery, bot) {
             const subjectMessage = await bot.sendMessage(
                 msg.chat.id, 
                 'What subject?', 
-                createMessageOptions(subjectButtons)
+                createMessageOptions({
+                    ...subjectButtons,
+                    reply_markup: {
+                        ...subjectButtons.reply_markup,
+                        inline_keyboard: [
+                            ...subjectButtons.reply_markup.inline_keyboard.slice(0, -1),
+                            [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_STUDYING }]
+                        ]
+                    }
+                })
             );
             
             sessionManager.lastSubjectMessage = {
@@ -183,6 +198,35 @@ async function handleCallback(callbackQuery, bot) {
             }
             break;
 
+        case ACTIONS.CREATE_QUESTION:
+            if (sessionManager.lastMenuMessage) {
+                try {
+                    await bot.deleteMessage(
+                        sessionManager.lastMenuMessage.chatId,
+                        sessionManager.lastMenuMessage.messageId
+                    );
+                } catch (error) {
+                    console.error('Error deleting menu message:', error);
+                }
+            }
+            
+            quiz.startQuestionCreation(userId);
+            await bot.sendMessage(
+                msg.chat.id,
+                'What subject?',
+                createMessageOptions({
+                    ...subjectButtons,
+                    reply_markup: {
+                        ...subjectButtons.reply_markup,
+                        inline_keyboard: [
+                            ...subjectButtons.reply_markup.inline_keyboard.slice(0, -1),
+                            [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_QUESTION }]
+                        ]
+                    }
+                })
+            );
+            break;
+
         case ACTIONS.CANCEL_QUESTION:
             try {
                 await bot.deleteMessage(msg.chat.id, msg.message_id);
@@ -217,47 +261,51 @@ async function handleCallback(callbackQuery, bot) {
             );
             break;
 
-        case ACTIONS.CREATE_QUESTION:
-            if (sessionManager.lastMenuMessage) {
-                try {
-                    await bot.deleteMessage(
-                        sessionManager.lastMenuMessage.chatId,
-                        sessionManager.lastMenuMessage.messageId
-                    );
-                } catch (error) {
-                    console.error('Error deleting menu message:', error);
-                }
-            }
-            
-            quiz.startQuestionCreation(userId);
-            await bot.sendMessage(
-                msg.chat.id,
-                'Please select the subject for your question:',
-                createMessageOptions(subjectButtons)
-            );
-            break;
-
         default:
             if (data.startsWith(`${ACTIONS.SELECT_SUBJECT}:`)) {
                 const subject = data.split(':')[1];
-                
-                if (sessionManager.lastSubjectMessage) {
-                    try {
-                        await bot.deleteMessage(
-                            sessionManager.lastSubjectMessage.chatId,
-                            sessionManager.lastSubjectMessage.messageId
-                        );
-                    } catch (error) {
-                        console.error('Error deleting subject message:', error);
+                const userState = quiz.userState.get(userId);
+
+                if (userState && userState.state === 'WAITING_SUBJECT') {
+                    // This is for question creation
+                    if (sessionManager.lastSubjectMessage) {
+                        try {
+                            await bot.deleteMessage(
+                                sessionManager.lastSubjectMessage.chatId,
+                                sessionManager.lastSubjectMessage.messageId
+                            );
+                        } catch (error) {
+                            console.error('Error deleting subject message:', error);
+                        }
                     }
+
+                    userState.questionData.subject = subject;
+                    userState.state = 'WAITING_QUESTION';
+                    await bot.sendMessage(
+                        msg.chat.id,
+                        'Please type your question:',
+                        createMessageOptions(questionCreationCancelButton)
+                    );
+                } else {
+                    // This is for starting a study session
+                    if (sessionManager.lastSubjectMessage) {
+                        try {
+                            await bot.deleteMessage(
+                                sessionManager.lastSubjectMessage.chatId,
+                                sessionManager.lastSubjectMessage.messageId
+                            );
+                        } catch (error) {
+                            console.error('Error deleting subject message:', error);
+                        }
+                    }
+
+                    sessionManager.startSession(userId, subject);
+                    await bot.sendMessage(
+                        msg.chat.id,
+                        `${userName} started studying ${subject}.`,
+                        createMessageOptions(studySessionButtons)
+                    );
                 }
-                
-                sessionManager.startSession(userId, subject);
-                await bot.sendMessage(
-                    msg.chat.id,
-                    `${userName} started studying ${subject}.`,
-                    createMessageOptions(studySessionButtons)
-                );
             }
     }
 }
