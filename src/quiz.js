@@ -1,7 +1,7 @@
 /**
  * quiz.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 04:42:14 UTC
+ * Created at: 2025-06-04 12:53:25 UTC
  */
 
 const { mainMenuButtons, questionCreationCancelButton } = require('./buttons');
@@ -26,7 +26,8 @@ class Quiz {
         const userStates = Array.from(this.userState.values());
         for (const state of userStates) {
             if (state.tempMessages && state.tempMessages.length > 0) {
-                for (const messageId of state.tempMessages) {
+                // Delete messages in reverse order to avoid issues
+                for (const messageId of state.tempMessages.reverse()) {
                     try {
                         await bot.deleteMessage(chatId, messageId);
                     } catch (error) {
@@ -85,7 +86,7 @@ class Quiz {
                 { ...options, disable_notification: true };
         };
 
-        // Add message to temp list for cleanup
+        // Add both user message and bot response to temp list for cleanup
         if (msg.message_id) {
             await this.addTempMessage(userId, msg.message_id);
         }
@@ -425,9 +426,6 @@ class Quiz {
                     }
                 }
             );
-
-            // Only delete the explanation message when clicking "Done Reading"
-            // The original question message stays
         }, 3000);
     }
 
