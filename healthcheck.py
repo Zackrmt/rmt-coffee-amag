@@ -1,6 +1,7 @@
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import logging
+import os
 
 class HealthCheck(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -16,9 +17,10 @@ class HealthCheck(BaseHTTPRequestHandler):
             self.wfile.write(b'Not Found')
 
 def run_health_server():
-    server_address = ('', 8080)
+    port = int(os.environ.get('PORT', 10000))  # Use PORT from environment or default to 10000
+    server_address = ('', port)
     httpd = HTTPServer(server_address, HealthCheck)
-    logging.info('Starting health check server on port 8080')
+    logging.info(f'Starting health check server on port {port}')
     httpd.serve_forever()
 
 def start_health_server():
