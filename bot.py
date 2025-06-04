@@ -22,7 +22,7 @@ logging.basicConfig(
 
 # Add specific user and time information
 CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-04 18:49:18"
+STARTUP_TIME = "2025-06-04 19:01:29"
 
 logger = logging.getLogger(__name__)
 
@@ -910,12 +910,6 @@ class TelegramBot:
             logger.error(f"Error handling {platform} share: {str(e)}")
             return ConversationHandler.END
     
-        async def handle_explanation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        # ... existing handle_explanation method code ...
-        except Exception as e:
-            logger.error(f"Error finalizing question: {str(e)}")
-            return ConversationHandler.END
-
     # ADD THE NEW METHOD HERE
     async def handle_share_response(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the user's response to sharing their progress."""
