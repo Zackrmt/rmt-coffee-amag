@@ -22,7 +22,7 @@ logging.basicConfig(
 
 # Add specific user and time information
 CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-04 17:45:55"
+STARTUP_TIME = "2025-06-04 17:58:02"
 
 logger = logging.getLogger(__name__)
 
@@ -726,23 +726,18 @@ def main():
     logger.info(f"Started by user: {CURRENT_USER}")
     logger.info("Initializing bot application...")
     
-    # Start health check server with port binding
+    # Kill any existing process using the health check port
     port = int(os.environ.get('PORT', 10000))
-    logger.info(f"Starting health check server on port {port}")
     try:
-        start_health_server()
-        logger.info("Health check server started successfully")
-    except Exception as e:
-        logger.error(f"Error starting health check server: {str(e)}")
-        # Continue anyway as this is not critical
-        pass    
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(('', port))
+        sock.close()
+    except socket.error as e:
+        if pass    
     # Create the Application and pass it your bot's token.
     application = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).build()
     
-    bot = TelegramBot()
-    logger.info("Setting up conversation handlers...")
-    
-    # Before main's closing statements
     bot = TelegramBot()
     logger.info("Setting up conversation handlers...")
     
@@ -806,7 +801,7 @@ def main():
     # Add standalone handlers
     application.add_handler(CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_'))
     application.add_handler(CallbackQueryHandler(bot.handle_share_response, pattern='^(share_progress|no_share)$'))
-    
+
     # Error handler with improved message cleanup
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log errors caused by Updates."""
@@ -835,30 +830,15 @@ def main():
 
     # Add error handler
     application.add_error_handler(error_handler)
-    
-    # Register shutdown handlers
-    def shutdown_handler():
-        """Handle graceful shutdown."""
-        logger.info("Shutting down bot...")
-        # Cleanup any resources
-        try:
-            # Add any cleanup code here
-            pass
-        except Exception as e:
-            logger.error(f"Error during shutdown: {str(e)}")
 
-    # Register the shutdown handler
-    import atexit
-    atexit.register(shutdown_handler)
-    
-    # Start the Bot
+    # Start the Bot with drop_pending_updates
     logger.info("Starting bot polling...")
     try:
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
         logger.info("Bot polling started successfully")
     except Exception as e:
         logger.error(f"Error starting bot: {str(e)}")
         raise
-        
+
 if __name__ == '__main__':
     main()
