@@ -17,7 +17,29 @@ const subjectButtons = {
             ...Object.entries(SUBJECTS).map(([_, subject]) => [
                 { text: subject, callback_data: `${ACTIONS.SELECT_SUBJECT}:${subject}` }
             ]),
-            [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_STUDYING }] // Add cancel button
+            [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_STUDYING }]
+        ]
+    }
+};
+
+const studySessionButtons = {
+    reply_markup: {
+        inline_keyboard: [
+            [
+                { text: 'START BREAK', callback_data: ACTIONS.START_BREAK },
+                { text: 'END STUDY SESSION', callback_data: ACTIONS.END_SESSION }
+            ]
+        ]
+    }
+};
+
+const breakButtons = {
+    reply_markup: {
+        inline_keyboard: [
+            [
+                { text: 'END BREAK', callback_data: ACTIONS.END_BREAK },
+                { text: 'END STUDY SESSION', callback_data: ACTIONS.END_SESSION }
+            ]
         ]
     }
 };
@@ -29,8 +51,6 @@ const questionCreationCancelButton = {
         ]
     }
 };
-
-// ... (other button configurations remain the same)
 
 module.exports = {
     mainMenuButtons,
