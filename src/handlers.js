@@ -1,7 +1,7 @@
 /**
  * handlers.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 03:04:02 UTC
+ * Created at: 2025-06-04 03:12:11 UTC
  */
 
 const { mainMenuButtons, subjectButtons, studySessionButtons, breakButtons, questionCreationCancelButton } = require('./buttons');
@@ -77,6 +77,43 @@ async function handleCallback(callbackQuery, bot) {
 
     if (data.startsWith('answer:')) {
         await quiz.handleAnswer(callbackQuery, bot);
+        return;
+    }
+
+    if (data.startsWith('add_confirm:')) {
+        const questionId = data.split(':')[1];
+        await quiz.handleAddConfirmation(questionId, msg.chat.id, bot, messageThreadId);
+        return;
+    }
+
+    if (data.startsWith('add_cancel:')) {
+        const questionId = data.split(':')[1];
+        await quiz.handleAddCancel(questionId, msg.chat.id, msg.message_id, bot, messageThreadId);
+        return;
+    }
+
+    if (data === 'start_new_question') {
+        try {
+            await bot.deleteMessage(msg.chat.id, msg.message_id);
+        } catch (error) {
+            console.error('Error deleting message:', error);
+        }
+        
+        quiz.startQuestionCreation(userId);
+        await bot.sendMessage(
+            msg.chat.id,
+            'What subject?',
+            createMessageOptions({
+                ...subjectButtons,
+                reply_markup: {
+                    ...subjectButtons.reply_markup,
+                    inline_keyboard: [
+                        ...subjectButtons.reply_markup.inline_keyboard.slice(0, -1),
+                        [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_QUESTION }]
+                    ]
+                }
+            })
+        );
         return;
     }
 
