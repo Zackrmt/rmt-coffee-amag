@@ -156,9 +156,9 @@ class TelegramBot:
     async def ask_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Ask if user wants to set a study goal."""
         query = update.callback_query
-        await query.answer()
-
-        await self.cleanup_messages(update, context)
+        if query:
+            await query.answer()
+            await self.cleanup_messages(update, context)
 
         # Create new study session
         self.study_sessions[update.effective_user.id] = StudySession()
@@ -179,9 +179,9 @@ class TelegramBot:
             context.user_data['last_message_id'] = message.message_id
             return SETTING_GOAL
         except Exception as e:
-            logger.error(f"Error sending message: {str(e)}")
+            logger.error(f"Error in ask_goal: {str(e)}")
             return ConversationHandler.END
-
+            
     async def handle_goal_response(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the response to setting a goal."""
         query = update.callback_query
@@ -742,8 +742,7 @@ def main():
     bot = TelegramBot()
     logger.info("Setting up conversation handlers...")
     
-    # Create conversation handler with states
-    conv_handler = ConversationHandler(
+      conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', bot.start)],
         states={
             CHOOSING_MAIN_MENU: [
@@ -751,7 +750,8 @@ def main():
                 CallbackQueryHandler(bot.start_creating_question, pattern='^create_question$')
             ],
             SETTING_GOAL: [
-                CallbackQueryHandler(bot.handle_goal_response, pattern='^(set_goal|skip_goal)$')
+                CallbackQueryHandler(bot.handle_goal_response, pattern='^set_goal$'),
+                CallbackQueryHandler(bot.handle_goal_response, pattern='^skip_goal$')
             ],
             CONFIRMING_GOAL: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, bot.confirm_goal),
@@ -774,7 +774,8 @@ def main():
                 CallbackQueryHandler(bot.start, pattern='^cancel_question$')
             ],
             CONFIRMING_QUESTION: [
-                CallbackQueryHandler(bot.handle_question_confirmation)
+                CallbackQueryHandler(bot.handle_question_confirmation, pattern='^confirm_question$'),
+                CallbackQueryHandler(bot.handle_question_confirmation, pattern='^retry_question$')
             ],
             SETTING_CHOICES: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_choice)
@@ -790,7 +791,9 @@ def main():
             CommandHandler('start', bot.start),
             CallbackQueryHandler(bot.handle_share_response, pattern='^(share_progress|no_share)$'),
             CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_')
-        ]
+        ],
+        per_message=False,
+        per_chat=True
     )
 
     # Add handlers
