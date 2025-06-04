@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: study-bot
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: NODE_ENV
+        value: production
+      - key: APP_URL
+        value: https://rmt-coffee-amag.onrender.com
+      - key: PORT
+        value: 8443
