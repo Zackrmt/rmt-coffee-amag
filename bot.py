@@ -734,7 +734,19 @@ def main():
         sock.bind(('', port))
         sock.close()
     except socket.error as e:
-        if        pass    
+        logger.warning(f"Port {port} already in use: {str(e)}")
+        pass
+        
+    # Start health check server with port binding
+    logger.info(f"Starting health check server on port {port}")
+    try:
+        start_health_server()
+        logger.info("Health check server started successfully")
+    except Exception as e:
+        logger.error(f"Error starting health check server: {str(e)}")
+        # Continue anyway as this is not critical
+        pass
+
     # Create the Application and pass it your bot's token.
     application = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).build()
     
