@@ -1,7 +1,7 @@
 /**
  * handlers.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 04:07:28 UTC
+ * Created at: 2025-06-04 04:39:46 UTC
  */
 
 const { mainMenuButtons, subjectButtons, studySessionButtons, breakButtons, questionCreationCancelButton } = require('./buttons');
@@ -72,7 +72,17 @@ async function handleCallback(callbackQuery, bot) {
     const messageThreadId = msg.message_thread_id;
 
     const createMessageOptions = (baseOptions = {}) => {
-        return messageThreadId ? { ...baseOptions, message_thread_id: messageThreadId } : baseOptions;
+        const isQuestionCreation = quiz.userState.get(userId)?.state?.startsWith('WAITING_');
+        return messageThreadId ? 
+            { 
+                ...baseOptions, 
+                message_thread_id: messageThreadId,
+                disable_notification: isQuestionCreation 
+            } : 
+            { 
+                ...baseOptions,
+                disable_notification: isQuestionCreation 
+            };
     };
 
     // Handle START_STUDYING with message deletion
