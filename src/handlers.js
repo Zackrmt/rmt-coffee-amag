@@ -1,5 +1,33 @@
+const { mainMenuButtons, subjectButtons, studySessionButtons, breakButtons, questionCreationCancelButton } = require('./buttons');
+const { ACTIONS } = require('./constants');
+const quiz = require('./quiz');
+
 class SessionManager {
-    // ... (previous code remains the same)
+    constructor() {
+        this.activeSessions = new Map();
+        this.lastMenuMessage = null;
+        this.lastSubjectMessage = null;
+    }
+
+    startSession(userId, subject) {
+        this.activeSessions.set(userId, { subject, status: 'studying' });
+    }
+
+    endSession(userId) {
+        this.activeSessions.delete(userId);
+    }
+
+    getSession(userId) {
+        return this.activeSessions.get(userId);
+    }
+
+    updateSessionStatus(userId, status) {
+        const session = this.activeSessions.get(userId);
+        if (session) {
+            session.status = status;
+            this.activeSessions.set(userId, session);
+        }
+    }
 }
 
 const sessionManager = new SessionManager();
@@ -8,7 +36,6 @@ async function handleStart(msg, bot) {
     const chatId = msg.chat.id;
     const message = await bot.sendMessage(chatId, 'Welcome to Study Logger Bot!', mainMenuButtons);
     
-    // Store message ID for later deletion
     sessionManager.lastMenuMessage = {
         chatId,
         messageId: message.message_id
@@ -29,7 +56,6 @@ async function handleCallback(callbackQuery, bot) {
     if (data.startsWith('delete_question:')) {
         const questionId = data.split(':')[1];
         await quiz.deleteQuestion(questionId, userId, msg.chat.id, bot);
-        // Delete the question message
         try {
             await bot.deleteMessage(msg.chat.id, msg.message_id);
         } catch (error) {
@@ -39,7 +65,6 @@ async function handleCallback(callbackQuery, bot) {
     }
 
     if (data.startsWith('done:')) {
-        // Delete the explanation message and show the question again
         await bot.deleteMessage(msg.chat.id, msg.message_id);
         const questionId = data.split(':')[1];
         const question = quiz.questions.get(questionId);
@@ -56,7 +81,6 @@ async function handleCallback(callbackQuery, bot) {
 
     switch (data) {
         case ACTIONS.START_STUDYING:
-            // Delete previous main menu message if exists
             if (sessionManager.lastMenuMessage) {
                 try {
                     await bot.deleteMessage(
@@ -76,7 +100,6 @@ async function handleCallback(callbackQuery, bot) {
             break;
 
         case ACTIONS.START_BREAK:
-            // Only delete the button, keep the message
             await bot.editMessageReplyMarkup(
                 { inline_keyboard: [] },
                 {
@@ -94,7 +117,6 @@ async function handleCallback(callbackQuery, bot) {
             break;
 
         case ACTIONS.END_BREAK:
-            // Only delete the button, keep the message
             await bot.editMessageReplyMarkup(
                 { inline_keyboard: [] },
                 {
@@ -112,7 +134,6 @@ async function handleCallback(callbackQuery, bot) {
             break;
 
         case ACTIONS.END_SESSION:
-            // Only delete the button, keep the message
             await bot.editMessageReplyMarkup(
                 { inline_keyboard: [] },
                 {
@@ -132,8 +153,41 @@ async function handleCallback(callbackQuery, bot) {
             }
             break;
 
+        case ACTIONS.CANCEL_QUESTION:
+            try {
+                await bot.deleteMessage(msg.chat.id, msg.message_id);
+            } catch (error) {
+                console.error('Error deleting message:', error);
+            }
+
+            quiz.cancelQuestionCreation(userId);
+            await bot.sendMessage(
+                msg.chat.id,
+                'Creating a question CANCELLED.',
+                mainMenuButtons
+            );
+            break;
+
+        case ACTIONS.CANCEL_STUDYING:
+            if (sessionManager.lastSubjectMessage) {
+                try {
+                    await bot.deleteMessage(
+                        sessionManager.lastSubjectMessage.chatId,
+                        sessionManager.lastSubjectMessage.messageId
+                    );
+                } catch (error) {
+                    console.error('Error deleting subject message:', error);
+                }
+            }
+
+            await bot.sendMessage(
+                msg.chat.id,
+                'Studying was mistakenly clicked. Session CANCELLED.',
+                mainMenuButtons
+            );
+            break;
+
         case ACTIONS.CREATE_QUESTION:
-            // Delete previous main menu message if exists
             if (sessionManager.lastMenuMessage) {
                 try {
                     await bot.deleteMessage(
@@ -146,14 +200,17 @@ async function handleCallback(callbackQuery, bot) {
             }
             
             quiz.startQuestionCreation(userId);
-            await bot.sendMessage(msg.chat.id, 'Please enter your question:');
+            await bot.sendMessage(
+                msg.chat.id, 
+                'Please enter your question:',
+                questionCreationCancelButton
+            );
             break;
 
         default:
             if (data.startsWith(`${ACTIONS.SELECT_SUBJECT}:`)) {
                 const subject = data.split(':')[1];
                 
-                // Delete the subject selection message
                 if (sessionManager.lastSubjectMessage) {
                     try {
                         await bot.deleteMessage(
@@ -177,7 +234,6 @@ async function handleCallback(callbackQuery, bot) {
 
 async function handleMessage(msg, bot) {
     if (await quiz.handleQuestionCreation(msg, bot)) {
-        // Message deletion is handled inside handleQuestionCreation
         return;
     }
 }
