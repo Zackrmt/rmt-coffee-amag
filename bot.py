@@ -22,7 +22,7 @@ logging.basicConfig(
 
 # Add specific user and time information
 CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-04 17:16:08"
+STARTUP_TIME = "2025-06-04 17:26:40"
 
 logger = logging.getLogger(__name__)
 
@@ -844,21 +844,11 @@ def main():
     import atexit
     atexit.register(shutdown_handler)
     
-        # Start the Bot with webhook
-    logger.info("Starting bot webhook...")
+    # Start the Bot
+    logger.info("Starting bot polling...")
     try:
-        # Get webhook URL from environment
-        webhook_url = os.environ.get('WEBHOOK_URL')
-        if not webhook_url:
-            raise ValueError("WEBHOOK_URL environment variable not set")
-            
-        application.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            url_path=os.environ["TELEGRAM_TOKEN"],
-            webhook_url=f"{webhook_url}/{os.environ['TELEGRAM_TOKEN']}"
-        )
-        logger.info("Bot webhook started successfully")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        logger.info("Bot polling started successfully")
     except Exception as e:
         logger.error(f"Error starting bot: {str(e)}")
         raise
