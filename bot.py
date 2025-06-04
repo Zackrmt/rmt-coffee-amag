@@ -881,6 +881,35 @@ class TelegramBot:
             logger.error(f"Error finalizing question: {str(e)}")
             return ConversationHandler.END
 
+    async def handle_social_share(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle sharing to social media platforms."""
+        query = update.callback_query
+        await query.answer()
+        await self.cleanup_messages(update, context)
+
+        if query.data == 'share_instagram':
+            platform = "Instagram"
+        else:  # share_facebook
+            platform = "Facebook"
+
+        # Return to main menu
+        keyboard = [
+            [InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        try:
+            message_id = await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                f"To share on {platform}, save the image above and upload it to your {platform} account.",
+                reply_markup=reply_markup
+            )
+            return CHOOSING_MAIN_MENU
+        except Exception as e:
+            logger.error(f"Error handling {platform} share: {str(e)}")
+            return ConversationHandler.END
+    
         async def handle_explanation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         # ... existing handle_explanation method code ...
         except Exception as e:
@@ -915,10 +944,7 @@ class TelegramBot:
         else:  # share_progress
             # Show design selection
             return await self.show_design_selection(update, context)
-
-    async def handle_answer_attempt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        # ... existing handle_answer_attempt method code ...
-        
+      
     async def handle_answer_attempt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle when someone attempts to answer a question."""
         query = update.callback_query
@@ -1051,7 +1077,9 @@ def main():
     application.add_handler(CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_'))
     application.add_handler(CallbackQueryHandler(bot.handle_share_response, pattern='^(share_progress|no_share)$'))
     application.add_handler(CallbackQueryHandler(bot.show_design_selection, pattern='^share_progress$'))
-
+    application.add_handler(CallbackQueryHandler(bot.handle_social_share, pattern='^share_(instagram|facebook)$'))
+    application.add_handler(CallbackQueryHandler(lambda u, c: None, pattern='^done_reading$'))
+    
     # Error handler
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log errors caused by Updates."""
