@@ -1,7 +1,7 @@
 /**
  * handlers.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 03:33:59 UTC
+ * Created at: 2025-06-04 03:41:33 UTC
  */
 
 const { mainMenuButtons, subjectButtons, studySessionButtons, breakButtons, questionCreationCancelButton } = require('./buttons');
@@ -100,7 +100,7 @@ async function handleCallback(callbackQuery, bot) {
         }
         
         quiz.startQuestionCreation(userId);
-        await bot.sendMessage(
+        const subjectMsg = await bot.sendMessage(
             msg.chat.id,
             'What subject?',
             createMessageOptions({
@@ -114,6 +114,7 @@ async function handleCallback(callbackQuery, bot) {
                 }
             })
         );
+        await quiz.addTempMessage(userId, subjectMsg.message_id);
         return;
     }
 
@@ -312,7 +313,7 @@ async function handleCallback(callbackQuery, bot) {
             }
             
             quiz.startQuestionCreation(userId);
-            await bot.sendMessage(
+            const subjectMsg = await bot.sendMessage(
                 msg.chat.id,
                 'What subject?',
                 createMessageOptions({
@@ -326,6 +327,7 @@ async function handleCallback(callbackQuery, bot) {
                     }
                 })
             );
+            await quiz.addTempMessage(userId, subjectMsg.message_id);
             break;
 
         case ACTIONS.CANCEL_QUESTION:
