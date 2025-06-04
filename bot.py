@@ -734,7 +734,7 @@ def main():
         sock.bind(('', port))
         sock.close()
     except socket.error as e:
-        if pass    
+        if        pass    
     # Create the Application and pass it your bot's token.
     application = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).build()
     
