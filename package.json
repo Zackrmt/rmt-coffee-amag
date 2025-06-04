@@ -2,10 +2,10 @@
     "name": "rmt-coffee-amag",
     "version": "1.0.0",
     "description": "RMT Coffee Study Logger",
-    "main": "index.js",
+    "main": "src/index.js",
     "scripts": {
-        "start": "node index.js",
-        "dev": "nodemon index.js"
+        "start": "node src/index.js",
+        "dev": "nodemon src/index.js"
     },
     "author": "Zackrmt",
     "license": "MIT",
