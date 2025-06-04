@@ -1,7 +1,7 @@
 /**
  * handlers.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 02:39:29 UTC
+ * Created at: 2025-06-04 03:04:02 UTC
  */
 
 const { mainMenuButtons, subjectButtons, studySessionButtons, breakButtons, questionCreationCancelButton } = require('./buttons');
@@ -80,29 +80,53 @@ async function handleCallback(callbackQuery, bot) {
         return;
     }
 
-    if (data.startsWith('delete_question:')) {
+    if (data.startsWith('delete_confirm_1:')) {
         const questionId = data.split(':')[1];
-        await quiz.deleteQuestion(questionId, userId, msg.chat.id, bot, messageThreadId);
         try {
             await bot.deleteMessage(msg.chat.id, msg.message_id);
         } catch (error) {
             console.error('Error deleting message:', error);
         }
+        await quiz.handleDeleteConfirmation1(questionId, userId, msg.chat.id, bot, messageThreadId);
+        return;
+    }
+
+    if (data.startsWith('delete_confirm_2:')) {
+        const questionId = data.split(':')[1];
+        try {
+            await bot.deleteMessage(msg.chat.id, msg.message_id);
+        } catch (error) {
+            console.error('Error deleting message:', error);
+        }
+        await quiz.handleDeleteConfirmation2(questionId, userId, msg.chat.id, bot, messageThreadId);
+        return;
+    }
+
+    if (data.startsWith('delete_cancel:')) {
+        const questionId = data.split(':')[1];
+        try {
+            await bot.deleteMessage(msg.chat.id, msg.message_id);
+        } catch (error) {
+            console.error('Error deleting message:', error);
+        }
+        await quiz.handleDeleteCancel(questionId, userId, msg.chat.id, bot, messageThreadId);
+        return;
+    }
+
+    if (data.startsWith('delete_question:')) {
+        const questionId = data.split(':')[1];
+        try {
+            await bot.deleteMessage(msg.chat.id, msg.message_id);
+        } catch (error) {
+            console.error('Error deleting message:', error);
+        }
+        await quiz.deleteQuestion(questionId, userId, msg.chat.id, bot, messageThreadId);
         return;
     }
 
     if (data.startsWith('done:')) {
-        await bot.deleteMessage(msg.chat.id, msg.message_id);
         const questionId = data.split(':')[1];
-        const question = quiz.questions.get(questionId);
-        if (question) {
-            const quizMessage = quiz.createQuizMessage(question);
-            const keyboard = quiz.createAnswerKeyboard(questionId, question.creatorId);
-            await bot.sendMessage(msg.chat.id, quizMessage, createMessageOptions({
-                reply_markup: keyboard,
-                parse_mode: 'HTML'
-            }));
-        }
+        await quiz.handleDoneReading(questionId, msg.chat.id, msg.message_id, bot, messageThreadId);
         return;
     }
 
