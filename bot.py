@@ -17,6 +17,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+
+# Add specific user and time information
+CURRENT_USER = "Zackrmt"
+STARTUP_TIME = "2025-06-04 16:06:08"
+
 logger = logging.getLogger(__name__)
 
 # States for conversation handler
@@ -541,7 +546,7 @@ class TelegramBot:
 
         # Create the final question message
         choices_text = "\n".join(f"{chr(65+i)}. {choice}" 
-                               for i, range(question.choices))
+                               for i, choice in enumerate(question.choices))
         question_text = (
             f"{question.question_text}\n\n{choices_text}\n\n"
             f"Question created by {question.creator_name}"
@@ -593,9 +598,9 @@ class TelegramBot:
 
 def main():
     """Start the bot."""
-    # Add startup logging
-    startup_time = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-    logger.info(f"Bot starting at {startup_time}")
+    # Add startup logging with specific time
+    logger.info(f"Bot starting at {STARTUP_TIME} UTC")
+    logger.info(f"Started by user: {CURRENT_USER}")
     logger.info("Initializing bot application...")
     
     # Start health check server
