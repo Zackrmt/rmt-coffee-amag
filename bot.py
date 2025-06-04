@@ -881,6 +881,44 @@ class TelegramBot:
             logger.error(f"Error finalizing question: {str(e)}")
             return ConversationHandler.END
 
+        async def handle_explanation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        # ... existing handle_explanation method code ...
+        except Exception as e:
+            logger.error(f"Error finalizing question: {str(e)}")
+            return ConversationHandler.END
+
+    # ADD THE NEW METHOD HERE
+    async def handle_share_response(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle the user's response to sharing their progress."""
+        query = update.callback_query
+        await query.answer()
+        await self.cleanup_messages(update, context)
+
+        if query.data == 'no_share':
+            # Return to main menu without sharing
+            keyboard = [
+                [InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            try:
+                message_id = await self.send_bot_message(
+                    context,
+                    update.effective_chat.id,
+                    "Ready to start another study session?",
+                    reply_markup=reply_markup
+                )
+                return CHOOSING_MAIN_MENU
+            except Exception as e:
+                logger.error(f"Error returning to main menu: {str(e)}")
+                return ConversationHandler.END
+        else:  # share_progress
+            # Show design selection
+            return await self.show_design_selection(update, context)
+
+    async def handle_answer_attempt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        # ... existing handle_answer_attempt method code ...
+        
     async def handle_answer_attempt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle when someone attempts to answer a question."""
         query = update.callback_query
