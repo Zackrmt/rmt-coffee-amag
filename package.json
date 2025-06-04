@@ -1,0 +1,22 @@
+{
+  "name": "study-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for study logging and quiz management",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js",
+    "dev": "nodemon src/bot.js"
+  },
+  "author": "Zackrmt",
+  "created": "2025-06-04 02:25:26 UTC",
+  "dependencies": {
+    "dotenv": "^16.0.3",
+    "node-telegram-bot-api": "^0.61.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
