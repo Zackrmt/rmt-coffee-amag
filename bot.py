@@ -742,7 +742,11 @@ def main():
     bot = TelegramBot()
     logger.info("Setting up conversation handlers...")
     
-conv_handler = ConversationHandler(
+    # Before main's closing statements
+    bot = TelegramBot()
+    logger.info("Setting up conversation handlers...")
+    
+    conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', bot.start)],
         states={
             CHOOSING_MAIN_MENU: [
@@ -802,7 +806,7 @@ conv_handler = ConversationHandler(
     # Add standalone handlers
     application.add_handler(CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_'))
     application.add_handler(CallbackQueryHandler(bot.handle_share_response, pattern='^(share_progress|no_share)$'))
-
+    
     # Error handler with improved message cleanup
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log errors caused by Updates."""
