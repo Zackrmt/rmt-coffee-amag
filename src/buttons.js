@@ -1,3 +1,9 @@
+/**
+ * buttons.js
+ * Created by: Zackrmt
+ * Created at: 2025-06-04 14:13:21 UTC
+ */
+
 const { SUBJECTS, ACTIONS } = require('./constants');
 
 const mainMenuButtons = {
@@ -44,10 +50,35 @@ const breakButtons = {
     }
 };
 
+const goalButtons = {
+    reply_markup: {
+        inline_keyboard: [
+            [
+                { text: '⏱️ Set Goal', callback_data: ACTIONS.SET_GOAL },
+                { text: '⏭️ Skip', callback_data: ACTIONS.SKIP_GOAL }
+            ]
+        ]
+    }
+};
+
 const questionCreationCancelButton = {
     reply_markup: {
         inline_keyboard: [
             [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_QUESTION }]
+        ]
+    }
+};
+
+const sharingButtons = {
+    reply_markup: {
+        inline_keyboard: [
+            [
+                { text: 'Share to Instagram Story', callback_data: ACTIONS.SHARE_INSTAGRAM },
+                { text: 'Share to Facebook Story', callback_data: ACTIONS.SHARE_FACEBOOK }
+            ],
+            [
+                { text: "Don't Share", callback_data: ACTIONS.DONT_SHARE }
+            ]
         ]
     }
 };
@@ -57,5 +88,7 @@ module.exports = {
     subjectButtons,
     studySessionButtons,
     breakButtons,
-    questionCreationCancelButton
+    goalButtons,
+    questionCreationCancelButton,
+    sharingButtons
 };
