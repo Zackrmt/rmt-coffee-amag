@@ -29,6 +29,15 @@ if (process.env.NODE_ENV === 'production') {
     bot.deleteWebHook();
 }
 
+// Handle /start command
+bot.onText(/\/start/, (msg) => handleStart(msg, bot));
+
+// Handle callback queries (button clicks)
+bot.on('callback_query', (callbackQuery) => handleCallback(callbackQuery, bot));
+
+// Handle regular messages
+bot.on('message', (msg) => handleMessage(msg, bot));
+
 // Error handling with reconnection logic
 bot.on('polling_error', (error) => {
     console.error('Polling error:', error);
@@ -48,13 +57,15 @@ bot.on('webhook_error', (error) => {
     console.error('Webhook error:', error);
 });
 
-// Handle /start command
-bot.onText(/\/start/, (msg) => handleStart(msg, bot));
-
-// Handle callback queries (button clicks)
-bot.on('callback_query', (callbackQuery) => handleCallback(callbackQuery, bot));
-
-// Handle regular messages
-bot.on('message', (msg) => handleMessage(msg, bot));
-
 console.log(`Bot is running in ${process.env.NODE_ENV || 'development'} mode...`);
+
+// Handle process termination
+process.on('SIGINT', () => {
+    bot.closeWebHook();
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    bot.closeWebHook();
+    process.exit(0);
+});
