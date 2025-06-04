@@ -1,48 +1,40 @@
 /**
  * handlers.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 12:50:43 UTC
+ * Created at: 2025-06-04 13:43:04 UTC
  */
 
 const { mainMenuButtons, subjectButtons, studySessionButtons, breakButtons, questionCreationCancelButton } = require('./buttons');
 const { ACTIONS } = require('./constants');
 const quiz = require('./quiz');
+const sessionManager = require('./sessionManager');
+const imageGenerator = require('./imageGenerator');
 
-class SessionManager {
-    constructor() {
-        this.activeSessions = new Map();
-        this.lastMenuMessage = null;
-        this.lastSubjectMessage = null;
-    }
+// Helper function to validate time format
+function isValidTimeFormat(time) {
+    return /^([0-9]|0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$/.test(time);
+}
 
-    startSession(userId, subject) {
-        this.activeSessions.set(userId, { subject, status: 'studying' });
-    }
+// Helper function to convert HH:MM to minutes
+function convertToMinutes(timeStr) {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return (hours * 60) + minutes;
+}
 
-    endSession(userId) {
-        this.activeSessions.delete(userId);
-    }
-
-    getSession(userId) {
-        return this.activeSessions.get(userId);
-    }
-
-    updateSessionStatus(userId, status) {
-        const session = this.activeSessions.get(userId);
-        if (session) {
-            session.status = status;
-            this.activeSessions.set(userId, session);
+async function cleanupMessages(chatId, bot, messageIds) {
+    for (const messageId of messageIds) {
+        try {
+            await bot.deleteMessage(chatId, messageId);
+        } catch (error) {
+            console.error('Error deleting message:', error);
         }
     }
 }
-
-const sessionManager = new SessionManager();
 
 async function handleStart(msg, bot) {
     const chatId = msg.chat.id;
     const messageThreadId = msg.message_thread_id;
     
-    // Only respond if message is in a topic or is a private chat
     if (!messageThreadId && msg.chat.type !== 'private') {
         return;
     }
@@ -55,6 +47,18 @@ async function handleStart(msg, bot) {
         messageOptions.message_thread_id = messageThreadId;
     }
 
+    // Cleanup any previous menu message
+    if (sessionManager.lastMenuMessage) {
+        try {
+            await bot.deleteMessage(
+                sessionManager.lastMenuMessage.chatId,
+                sessionManager.lastMenuMessage.messageId
+            );
+        } catch (error) {
+            console.error('Error deleting previous menu:', error);
+        }
+    }
+
     const message = await bot.sendMessage(chatId, 'Welcome to Study Logger Bot!', messageOptions);
     
     sessionManager.lastMenuMessage = {
@@ -62,6 +66,25 @@ async function handleStart(msg, bot) {
         messageId: message.message_id,
         messageThreadId
     };
+}
+
+async function handleStudyGoal(msg, bot, messageThreadId) {
+    const goalMessage = await bot.sendMessage(
+        msg.chat.id,
+        'Study hours goal for this session:',
+        {
+            message_thread_id: messageThreadId,
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '⏱️ Set Goal', callback_data: ACTIONS.SET_GOAL },
+                        { text: '⏭️ Skip', callback_data: ACTIONS.SKIP_GOAL }
+                    ]
+                ]
+            }
+        }
+    );
+    sessionManager.addSessionMessage(msg.from.id, goalMessage.message_id);
 }
 
 async function handleCallback(callbackQuery, bot) {
@@ -72,56 +95,40 @@ async function handleCallback(callbackQuery, bot) {
     const messageThreadId = msg.message_thread_id;
 
     const createMessageOptions = (baseOptions = {}) => {
-        const isQuestionCreation = quiz.userState.get(userId)?.state?.startsWith('WAITING_');
         return messageThreadId ? 
-            { 
-                ...baseOptions, 
-                message_thread_id: messageThreadId,
-                disable_notification: isQuestionCreation 
-            } : 
-            { 
-                ...baseOptions,
-                disable_notification: isQuestionCreation 
-            };
+            { ...baseOptions, message_thread_id: messageThreadId } : 
+            baseOptions;
     };
 
-    // Handle START_STUDYING with message deletion
-    if (data.startsWith(`${ACTIONS.START_STUDYING}:`)) {
-        const [action, messageToDeleteId] = data.split(':');
-        try {
-            // Delete the "click button below" message
-            await bot.deleteMessage(msg.chat.id, msg.message_id);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-        }
+    // Start Studying Flow
+    if (data === ACTIONS.START_STUDYING) {
+        // Clean up previous messages
+        const previousMessages = sessionManager.getSessionMessages(userId);
+        await cleanupMessages(msg.chat.id, bot, previousMessages);
+        sessionManager.clearSessionMessages(userId);
 
-        // Continue with the regular START_STUDYING logic
-        if (sessionManager.lastMenuMessage) {
-            try {
-                await bot.deleteMessage(
-                    sessionManager.lastMenuMessage.chatId,
-                    sessionManager.lastMenuMessage.messageId
-                );
-            } catch (error) {
-                console.error('Error deleting menu message:', error);
-            }
-        }
-        
-        const subjectMessage = await bot.sendMessage(
-            msg.chat.id, 
-            'What subject?', 
-            createMessageOptions({
-                ...subjectButtons,
-                reply_markup: {
-                    ...subjectButtons.reply_markup,
-                    inline_keyboard: [
-                        ...subjectButtons.reply_markup.inline_keyboard.slice(0, -1),
-                        [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_STUDYING }]
-                    ]
-                }
-            })
+        await handleStudyGoal(msg, bot, messageThreadId);
+        return;
+    }
+
+    // Goal Setting Flow
+    if (data === ACTIONS.SET_GOAL) {
+        const promptMsg = await bot.sendMessage(
+            msg.chat.id,
+            'Please enter your study goal in HH:MM format (e.g., 2:00 for 2 hours):',
+            createMessageOptions(questionCreationCancelButton)
         );
-        
+        sessionManager.addSessionMessage(userId, promptMsg.message_id);
+        return;
+    }
+
+    if (data === ACTIONS.SKIP_GOAL) {
+        // Show subject selection
+        const subjectMessage = await bot.sendMessage(
+            msg.chat.id,
+            'What subject?',
+            createMessageOptions(subjectButtons)
+        );
         sessionManager.lastSubjectMessage = {
             chatId: msg.chat.id,
             messageId: subjectMessage.message_id,
@@ -130,396 +137,276 @@ async function handleCallback(callbackQuery, bot) {
         return;
     }
 
-    if (data.startsWith('answer:')) {
-        await quiz.handleAnswer(callbackQuery, bot);
-        return;
-    }
+    if (data === ACTIONS.CONFIRM_GOAL) {
+        const session = sessionManager.getSession(userId);
+        if (session && session.tempGoalMinutes) {
+            sessionManager.setGoalTime(userId, session.tempGoalMinutes);
+            delete session.tempGoalMinutes;
 
-    if (data.startsWith('add_confirm:')) {
-        const questionId = data.split(':')[1];
-        await quiz.handleAddConfirmation(questionId, msg.chat.id, bot, messageThreadId);
-        return;
-    }
-
-    if (data.startsWith('add_cancel:')) {
-        const questionId = data.split(':')[1];
-        await quiz.handleAddCancel(questionId, msg.chat.id, msg.message_id, bot, messageThreadId);
-        return;
-    }
-
-    if (data === 'start_new_question') {
-        try {
-            await bot.deleteMessage(msg.chat.id, msg.message_id);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-        }
-        
-        quiz.startQuestionCreation(userId);
-        const subjectMsg = await bot.sendMessage(
-            msg.chat.id,
-            'What subject?',
-            createMessageOptions({
-                ...subjectButtons,
-                reply_markup: {
-                    ...subjectButtons.reply_markup,
-                    inline_keyboard: [
-                        ...subjectButtons.reply_markup.inline_keyboard.slice(0, -1),
-                        [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_QUESTION }]
-                    ]
-                }
-            })
-        );
-        await quiz.addTempMessage(userId, subjectMsg.message_id);
-        return;
-    }
-
-    if (data === 'confirm_choices') {
-        try {
-            await bot.deleteMessage(msg.chat.id, msg.message_id);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-        }
-        await quiz.handleConfirmChoices(userId, msg.chat.id, bot, messageThreadId);
-        return;
-    }
-
-    if (data === 'retry_choices') {
-        try {
-            await bot.deleteMessage(msg.chat.id, msg.message_id);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-        }
-        await quiz.handleRetryChoices(userId, msg.chat.id, bot, messageThreadId);
-        return;
-    }
-
-    if (data === 'confirm_answer') {
-        try {
-            await bot.deleteMessage(msg.chat.id, msg.message_id);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-        }
-        await quiz.handleConfirmAnswer(userId, msg.chat.id, bot, messageThreadId);
-        return;
-    }
-
-    if (data === 'retry_answer') {
-        try {
-            await bot.deleteMessage(msg.chat.id, msg.message_id);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-        }
-        await quiz.handleRetryAnswer(userId, msg.chat.id, bot, messageThreadId);
-        return;
-    }
-
-    if (data.startsWith('delete_confirm_1:')) {
-        const questionId = data.split(':')[1];
-        try {
-            await bot.deleteMessage(msg.chat.id, msg.message_id);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-        }
-        await quiz.handleDeleteConfirmation1(questionId, userId, msg.chat.id, bot, messageThreadId);
-        return;
-    }
-
-    if (data.startsWith('delete_confirm_2:')) {
-        const questionId = data.split(':')[1];
-        try {
-            await bot.deleteMessage(msg.chat.id, msg.message_id);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-        }
-        await quiz.handleDeleteConfirmation2(questionId, userId, msg.chat.id, bot, messageThreadId);
-        return;
-    }
-
-    if (data.startsWith('delete_cancel:')) {
-        const questionId = data.split(':')[1];
-        try {
-            await bot.deleteMessage(msg.chat.id, msg.message_id);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-        }
-        await quiz.handleDeleteCancel(questionId, userId, msg.chat.id, bot, messageThreadId);
-        return;
-    }
-
-    if (data.startsWith('delete_question:')) {
-        const questionId = data.split(':')[1];
-        try {
-            await bot.deleteMessage(msg.chat.id, msg.message_id);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-        }
-        await quiz.deleteQuestion(questionId, userId, msg.chat.id, bot, messageThreadId);
-        return;
-    }
-
-    if (data.startsWith('done:')) {
-        const questionId = data.split(':')[1];
-        await quiz.handleDoneReading(questionId, msg.chat.id, msg.message_id, bot, messageThreadId);
-        return;
-    }
-
-    switch (data) {
-        case ACTIONS.START_STUDYING:
-            if (sessionManager.lastMenuMessage) {
-                try {
-                    await bot.deleteMessage(
-                        sessionManager.lastMenuMessage.chatId,
-                        sessionManager.lastMenuMessage.messageId
-                    );
-                } catch (error) {
-                    console.error('Error deleting menu message:', error);
-                }
-            }
-            
+            // Show subject selection
             const subjectMessage = await bot.sendMessage(
-                msg.chat.id, 
-                'What subject?', 
-                createMessageOptions({
-                    ...subjectButtons,
-                    reply_markup: {
-                        ...subjectButtons.reply_markup,
-                        inline_keyboard: [
-                            ...subjectButtons.reply_markup.inline_keyboard.slice(0, -1),
-                            [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_STUDYING }]
-                        ]
-                    }
-                })
+                msg.chat.id,
+                'What subject?',
+                createMessageOptions(subjectButtons)
             );
-            
             sessionManager.lastSubjectMessage = {
                 chatId: msg.chat.id,
                 messageId: subjectMessage.message_id,
                 messageThreadId
             };
-            break;
+        }
+        return;
+    }
 
-        case ACTIONS.START_BREAK:
-            await bot.editMessageReplyMarkup(
-                { inline_keyboard: [] },
-                {
-                    chat_id: msg.chat.id,
-                    message_id: msg.message_id,
-                    message_thread_id: messageThreadId
-                }
-            );
-            
-            sessionManager.updateSessionStatus(userId, 'break');
+    if (data === ACTIONS.RETRY_GOAL) {
+        const session = sessionManager.getSession(userId);
+        if (session) {
+            delete session.tempGoalMinutes;
+        }
+        
+        const promptMsg = await bot.sendMessage(
+            msg.chat.id,
+            'Please enter your study goal in HH:MM format (e.g., 2:00 for 2 hours):',
+            createMessageOptions(questionCreationCancelButton)
+        );
+        sessionManager.addSessionMessage(userId, promptMsg.message_id);
+        return;
+    }
+
+    // Subject Selection
+    if (data.startsWith(`${ACTIONS.SELECT_SUBJECT}:`)) {
+        const subject = data.split(':')[1];
+        
+        // Start new session
+        sessionManager.startSession(userId, subject);
+        
+        const message = await bot.sendMessage(
+            msg.chat.id,
+            `Started studying ${subject}`,
+            createMessageOptions(studySessionButtons)
+        );
+        
+        sessionManager.addSessionMessage(userId, message.message_id);
+        return;
+    }
+
+    // Break Handling
+    if (data === ACTIONS.START_BREAK) {
+        sessionManager.startBreak(userId);
+        const message = await bot.sendMessage(
+            msg.chat.id,
+            'Break started',
+            createMessageOptions(breakButtons)
+        );
+        sessionManager.addSessionMessage(userId, message.message_id);
+        return;
+    }
+
+    if (data === ACTIONS.END_BREAK) {
+        sessionManager.endBreak(userId);
+        const message = await bot.sendMessage(
+            msg.chat.id,
+            'Break ended',
+            createMessageOptions(studySessionButtons)
+        );
+        sessionManager.addSessionMessage(userId, message.message_id);
+        return;
+    }
+
+    // End Session
+    if (data === ACTIONS.END_SESSION) {
+        const session = sessionManager.getSession(userId);
+        if (session) {
+            const stats = sessionManager.endSession(userId);
+
+            // Message 1 - Permanent completion message
             await bot.sendMessage(
                 msg.chat.id,
-                `${userName} started their break.`,
-                createMessageOptions(breakButtons)
+                `${userName} ended their review on ${session.subject}. Congrats ${userName}.`,
+                createMessageOptions({})
             );
-            break;
 
-        case ACTIONS.END_BREAK:
-            await bot.editMessageReplyMarkup(
-                { inline_keyboard: [] },
-                {
-                    chat_id: msg.chat.id,
-                    message_id: msg.message_id,
-                    message_thread_id: messageThreadId
-                }
+            // Message 2 - Goal time (temporary)
+            const goalMsg = await bot.sendMessage(
+                msg.chat.id,
+                `Your goal study time for this session was ${sessionManager.formatTime(stats.goalTime)}`,
+                createMessageOptions({})
             );
-            
-            sessionManager.updateSessionStatus(userId, 'studying');
+            sessionManager.addSessionMessage(userId, goalMsg.message_id);
+
+            // Message 3 - Study time (permanent)
             await bot.sendMessage(
                 msg.chat.id,
-                `${userName} ended their break and started studying.`,
-                createMessageOptions(studySessionButtons)
+                `Your total study time for this session is ${sessionManager.formatTime(stats.actualTime)}`,
+                createMessageOptions({})
             );
-            break;
 
-        case ACTIONS.END_SESSION:
-            await bot.editMessageReplyMarkup(
-                { inline_keyboard: [] },
-                {
-                    chat_id: msg.chat.id,
-                    message_id: msg.message_id,
-                    message_thread_id: messageThreadId
-                }
-            );
-            
-            const session = sessionManager.getSession(userId);
-            if (session) {
-                // Send first message
-                await bot.sendMessage(
-                    msg.chat.id,
-                    `${userName} ended their review on ${session.subject}. Congrats ${userName}.`,
-                    createMessageOptions({})
-                );
-
-                // Send second message after 3 seconds
-                setTimeout(async () => {
-                    const secondMsg = await bot.sendMessage(
-                        msg.chat.id,
-                        'If you want to start a study session again, just click the button below',
-                        createMessageOptions({
-                            reply_markup: {
-                                inline_keyboard: [[
-                                    { text: '📚 Start Studying', callback_data: `${ACTIONS.START_STUDYING}:${msg.message_id}` }
-                                ]]
-                            }
-                        })
-                    );
-                }, 3000);
-
-                sessionManager.endSession(userId);
-            }
-            break;
-
-        case ACTIONS.CREATE_QUESTION:
-            if (sessionManager.lastMenuMessage) {
-                try {
-                    await bot.deleteMessage(
-                        sessionManager.lastMenuMessage.chatId,
-                        sessionManager.lastMenuMessage.messageId
-                    );
-                } catch (error) {
-                    console.error('Error deleting menu message:', error);
-                }
-            }
-            
-            quiz.startQuestionCreation(userId);
-            const subjectMsg = await bot.sendMessage(
+            // Message 4 - Break time (temporary)
+            const breakMsg = await bot.sendMessage(
                 msg.chat.id,
-                'What subject?',
-                createMessageOptions({
-                    ...subjectButtons,
+                `Your total break time was ${sessionManager.formatTime(stats.breakTime)}`,
+                createMessageOptions({})
+            );
+            sessionManager.addSessionMessage(userId, breakMsg.message_id);
+
+            // Message 5 - Design selection
+            const designMsg = await bot.sendMessage(
+                msg.chat.id,
+                'Select a design to share your progress:',
+                {
+                    ...createMessageOptions({}),
                     reply_markup: {
-                        ...subjectButtons.reply_markup,
                         inline_keyboard: [
-                            ...subjectButtons.reply_markup.inline_keyboard.slice(0, -1),
-                            [{ text: '❌ Cancel', callback_data: ACTIONS.CANCEL_QUESTION }]
+                            [
+                                { text: 'Design 1', callback_data: 'select_design:1' },
+                                { text: 'Design 2', callback_data: 'select_design:2' },
+                                { text: 'Design 3', callback_data: 'select_design:3' }
+                            ]
                         ]
                     }
-                })
+                }
             );
-            await quiz.addTempMessage(userId, subjectMsg.message_id);
-            break;
-
-        case ACTIONS.CANCEL_QUESTION:
-            try {
-                // First clean up all temporary messages stored during question creation
-                await quiz.cleanupMessages(msg.chat.id, bot);
-                
-                // Then delete the current message (the one with the Cancel button)
-                await bot.deleteMessage(msg.chat.id, msg.message_id);
-            } catch (error) {
-                console.error('Error deleting messages:', error);
-            }
-
-            quiz.cancelQuestionCreation(userId);
-            const cancelMsg = await bot.sendMessage(
-                msg.chat.id,
-                'Creating a question CANCELLED.',
-                createMessageOptions({
-                    reply_markup: {
-                        inline_keyboard: [[
-                            { text: '➕ Create New Question', callback_data: ACTIONS.CREATE_QUESTION }
-                        ]]
-                    }
-                })
-            );
-
-            // Delete the cancellation message after 15 seconds
-            setTimeout(async () => {
-                try {
-                    await bot.deleteMessage(msg.chat.id, cancelMsg.message_id);
-                } catch (error) {
-                    console.error('Error deleting cancellation message:', error);
-                }
-            }, 15000);
-            break;
-
-        case ACTIONS.CANCEL_STUDYING:
-            if (sessionManager.lastSubjectMessage) {
-                try {
-                    await bot.deleteMessage(
-                        sessionManager.lastSubjectMessage.chatId,
-                        sessionManager.lastSubjectMessage.messageId
-                    );
-                } catch (error) {
-                    console.error('Error deleting subject message:', error);
-                }
-            }
-
-            const cancelStudyMsg = await bot.sendMessage(
-                msg.chat.id,
-                'Studying was mistakenly clicked. Session CANCELLED.',
-                createMessageOptions(mainMenuButtons)
-            );
-
-            // Delete the cancellation message after 5 seconds
-            setTimeout(async () => {
-                try {
-                    await bot.deleteMessage(msg.chat.id, cancelStudyMsg.message_id);
-                } catch (error) {
-                    console.error('Error deleting cancellation message:', error);
-                }
-            }, 5000);
-            break;
-
-        default:
-            if (data.startsWith(`${ACTIONS.SELECT_SUBJECT}:`)) {
-                const subject = data.split(':')[1];
-                const userState = quiz.userState.get(userId);
-
-                if (userState && userState.state === 'WAITING_SUBJECT') {
-                    // This is for question creation
-                    if (sessionManager.lastSubjectMessage) {
-                        try {
-                            await bot.deleteMessage(
-                                sessionManager.lastSubjectMessage.chatId,
-                                sessionManager.lastSubjectMessage.messageId
-                            );
-                        } catch (error) {
-                            console.error('Error deleting subject message:', error);
-                        }
-                    }
-
-                    userState.questionData.subject = subject;
-                    userState.state = 'WAITING_QUESTION';
-                    const botMsg = await bot.sendMessage(
-                        msg.chat.id,
-                        'Please type your question:',
-                        createMessageOptions(questionCreationCancelButton)
-                    );
-                    await quiz.addTempMessage(userId, botMsg.message_id);
-                } else {
-                    // This is for starting a study session
-                    if (sessionManager.lastSubjectMessage) {
-                        try {
-                            await bot.deleteMessage(
-                                sessionManager.lastSubjectMessage.chatId,
-                                sessionManager.lastSubjectMessage.messageId
-                            );
-                        } catch (error) {
-                            console.error('Error deleting subject message:', error);
-                        }
-                    }
-
-                    sessionManager.startSession(userId, subject);
-                    await bot.sendMessage(
-                        msg.chat.id,
-                        `${userName} started studying ${subject}.`,
-                        createMessageOptions(studySessionButtons)
-                    );
-                }
-            }
+            sessionManager.addSessionMessage(userId, designMsg.message_id);
+        }
+        return;
     }
+
+    // Design Selection and Sharing
+    if (data.startsWith('select_design:')) {
+        const designNumber = data.split(':')[1];
+        const stats = sessionManager.getCurrentStats(userId);
+        if (!stats) return;
+
+        let imageBuffer;
+        switch (designNumber) {
+            case '1':
+                imageBuffer = await imageGenerator.generateDesign1(stats);
+                break;
+            case '2':
+                imageBuffer = await imageGenerator.generateDesign2(stats);
+                break;
+            case '3':
+                imageBuffer = await imageGenerator.generateDesign3(stats);
+                break;
+        }
+
+        // Send the generated image with sharing options
+        const shareMsg = await bot.sendPhoto(msg.chat.id, imageBuffer, {
+            ...createMessageOptions({}),
+            caption: 'Share your progress:',
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: 'Share to Instagram Story', callback_data: ACTIONS.SHARE_INSTAGRAM },
+                        { text: 'Share to Facebook Story', callback_data: ACTIONS.SHARE_FACEBOOK }
+                    ],
+                    [
+                        { text: "Don't Share", callback_data: ACTIONS.DONT_SHARE }
+                    ]
+                ]
+            }
+        });
+        sessionManager.addSessionMessage(userId, shareMsg.message_id);
+        return;
+    }
+
+    if (data === ACTIONS.SHARE_INSTAGRAM || data === ACTIONS.SHARE_FACEBOOK) {
+        await bot.answerCallbackQuery(callbackQuery.id, {
+            text: 'Opening sharing...',
+            show_alert: false
+        });
+        // Here you would implement the actual sharing functionality
+        return;
+    }
+
+    if (data === ACTIONS.DONT_SHARE) {
+        const newSessionMsg = await bot.sendMessage(
+            msg.chat.id,
+            'If you want to start a study session again, just click the button below',
+            createMessageOptions({
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: '📚 Start Studying', callback_data: ACTIONS.START_STUDYING }
+                    ]]
+                }
+            })
+        );
+        sessionManager.addSessionMessage(userId, newSessionMsg.message_id);
+        return;
+    }
+
+    // Cancel Actions
+    if (data === ACTIONS.CANCEL_STUDYING) {
+        sessionManager.endSession(userId);
+        await handleStart(msg, bot);
+        return;
+    }
+
+    // Question Creation
+    if (data === ACTIONS.CREATE_QUESTION) {
+        quiz.startQuestionCreation(userId);
+        const message = await bot.sendMessage(
+            msg.chat.id,
+            'Please upload an image with your question or type your question:',
+            createMessageOptions(questionCreationCancelButton)
+        );
+        sessionManager.addSessionMessage(userId, message.message_id);
+        return;
+    }
+
+    if (data === ACTIONS.CANCEL_QUESTION) {
+        quiz.cancelQuestionCreation(userId);
+        await handleStart(msg, bot);
+        return;
+    }
+
+    // Handle other quiz-related callbacks
+    await quiz.handleCallback(callbackQuery, bot);
 }
 
 async function handleMessage(msg, bot) {
-    // Only process messages in topics or private chats
     if (!msg.message_thread_id && msg.chat.type !== 'private') {
         return;
     }
+
+    const userId = msg.from.id;
+
+    // Handle study goal time input
+    const session = sessionManager.getSession(userId);
+    if (session && !session.goalTimeMinutes && msg.text) {
+        if (isValidTimeFormat(msg.text)) {
+            const minutes = convertToMinutes(msg.text);
+            
+            // Show confirmation message
+            const confirmMsg = await bot.sendMessage(
+                msg.chat.id,
+                `Confirm study goal time: ${msg.text}?`,
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '✅ Yes', callback_data: ACTIONS.CONFIRM_GOAL },
+                                { text: '❌ No', callback_data: ACTIONS.RETRY_GOAL }
+                            ]
+                        ]
+                    }
+                }
+            );
+            session.tempGoalMinutes = minutes;
+            sessionManager.addSessionMessage(userId, confirmMsg.message_id);
+            return;
+        } else {
+            const errorMsg = await bot.sendMessage(
+                msg.chat.id,
+                'Please enter time in HH:MM format (e.g., 2:00 for 2 hours)',
+                { reply_markup: questionCreationCancelButton.reply_markup }
+            );
+            sessionManager.addSessionMessage(userId, errorMsg.message_id);
+            return;
+        }
+    }
     
+    // Handle quiz question creation
     if (await quiz.handleQuestionCreation(msg, bot)) {
         return;
     }
