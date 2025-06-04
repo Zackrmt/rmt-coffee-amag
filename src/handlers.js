@@ -34,11 +34,27 @@ const sessionManager = new SessionManager();
 
 async function handleStart(msg, bot) {
     const chatId = msg.chat.id;
-    const message = await bot.sendMessage(chatId, 'Welcome to Study Logger Bot!', mainMenuButtons);
+    const messageThreadId = msg.message_thread_id;
+    
+    // Only respond if message is in a topic or is a private chat
+    if (!messageThreadId && msg.chat.type !== 'private') {
+        return;
+    }
+    
+    const messageOptions = {
+        ...mainMenuButtons
+    };
+    
+    if (messageThreadId) {
+        messageOptions.message_thread_id = messageThreadId;
+    }
+
+    const message = await bot.sendMessage(chatId, 'Welcome to Study Logger Bot!', messageOptions);
     
     sessionManager.lastMenuMessage = {
         chatId,
-        messageId: message.message_id
+        messageId: message.message_id,
+        messageThreadId
     };
 }
 
@@ -47,6 +63,11 @@ async function handleCallback(callbackQuery, bot) {
     const data = callbackQuery.data;
     const userId = callbackQuery.from.id;
     const userName = callbackQuery.from.first_name || `User${userId}`;
+    const messageThreadId = msg.message_thread_id;
+
+    const createMessageOptions = (baseOptions = {}) => {
+        return messageThreadId ? { ...baseOptions, message_thread_id: messageThreadId } : baseOptions;
+    };
 
     if (data.startsWith('answer:')) {
         await quiz.handleAnswer(callbackQuery, bot);
@@ -55,7 +76,7 @@ async function handleCallback(callbackQuery, bot) {
 
     if (data.startsWith('delete_question:')) {
         const questionId = data.split(':')[1];
-        await quiz.deleteQuestion(questionId, userId, msg.chat.id, bot);
+        await quiz.deleteQuestion(questionId, userId, msg.chat.id, bot, messageThreadId);
         try {
             await bot.deleteMessage(msg.chat.id, msg.message_id);
         } catch (error) {
@@ -71,10 +92,10 @@ async function handleCallback(callbackQuery, bot) {
         if (question) {
             const quizMessage = quiz.createQuizMessage(question);
             const keyboard = quiz.createAnswerKeyboard(questionId, question.creatorId);
-            await bot.sendMessage(msg.chat.id, quizMessage, {
+            await bot.sendMessage(msg.chat.id, quizMessage, createMessageOptions({
                 reply_markup: keyboard,
                 parse_mode: 'HTML'
-            });
+            }));
         }
         return;
     }
@@ -92,10 +113,16 @@ async function handleCallback(callbackQuery, bot) {
                 }
             }
             
-            const subjectMessage = await bot.sendMessage(msg.chat.id, 'What subject?', subjectButtons);
+            const subjectMessage = await bot.sendMessage(
+                msg.chat.id, 
+                'What subject?', 
+                createMessageOptions(subjectButtons)
+            );
+            
             sessionManager.lastSubjectMessage = {
                 chatId: msg.chat.id,
-                messageId: subjectMessage.message_id
+                messageId: subjectMessage.message_id,
+                messageThreadId
             };
             break;
 
@@ -104,7 +131,8 @@ async function handleCallback(callbackQuery, bot) {
                 { inline_keyboard: [] },
                 {
                     chat_id: msg.chat.id,
-                    message_id: msg.message_id
+                    message_id: msg.message_id,
+                    message_thread_id: messageThreadId
                 }
             );
             
@@ -112,7 +140,7 @@ async function handleCallback(callbackQuery, bot) {
             await bot.sendMessage(
                 msg.chat.id,
                 `${userName} started a break. Break Responsibly, ${userName}!`,
-                breakButtons
+                createMessageOptions(breakButtons)
             );
             break;
 
@@ -121,7 +149,8 @@ async function handleCallback(callbackQuery, bot) {
                 { inline_keyboard: [] },
                 {
                     chat_id: msg.chat.id,
-                    message_id: msg.message_id
+                    message_id: msg.message_id,
+                    message_thread_id: messageThreadId
                 }
             );
             
@@ -129,7 +158,7 @@ async function handleCallback(callbackQuery, bot) {
             await bot.sendMessage(
                 msg.chat.id,
                 `${userName} ended their break and started studying.`,
-                studySessionButtons
+                createMessageOptions(studySessionButtons)
             );
             break;
 
@@ -138,7 +167,8 @@ async function handleCallback(callbackQuery, bot) {
                 { inline_keyboard: [] },
                 {
                     chat_id: msg.chat.id,
-                    message_id: msg.message_id
+                    message_id: msg.message_id,
+                    message_thread_id: messageThreadId
                 }
             );
             
@@ -147,7 +177,7 @@ async function handleCallback(callbackQuery, bot) {
                 await bot.sendMessage(
                     msg.chat.id,
                     `${userName} ended their review on ${session.subject}. Congrats ${userName}. If you want to start a study session again, just click the button below`,
-                    mainMenuButtons
+                    createMessageOptions(mainMenuButtons)
                 );
                 sessionManager.endSession(userId);
             }
@@ -164,7 +194,7 @@ async function handleCallback(callbackQuery, bot) {
             await bot.sendMessage(
                 msg.chat.id,
                 'Creating a question CANCELLED.',
-                mainMenuButtons
+                createMessageOptions(mainMenuButtons)
             );
             break;
 
@@ -183,7 +213,7 @@ async function handleCallback(callbackQuery, bot) {
             await bot.sendMessage(
                 msg.chat.id,
                 'Studying was mistakenly clicked. Session CANCELLED.',
-                mainMenuButtons
+                createMessageOptions(mainMenuButtons)
             );
             break;
 
@@ -201,9 +231,9 @@ async function handleCallback(callbackQuery, bot) {
             
             quiz.startQuestionCreation(userId);
             await bot.sendMessage(
-                msg.chat.id, 
-                'Please enter your question:',
-                questionCreationCancelButton
+                msg.chat.id,
+                'Please select the subject for your question:',
+                createMessageOptions(subjectButtons)
             );
             break;
 
@@ -226,13 +256,18 @@ async function handleCallback(callbackQuery, bot) {
                 await bot.sendMessage(
                     msg.chat.id,
                     `${userName} started studying ${subject}.`,
-                    studySessionButtons
+                    createMessageOptions(studySessionButtons)
                 );
             }
     }
 }
 
 async function handleMessage(msg, bot) {
+    // Only process messages in topics or private chats
+    if (!msg.message_thread_id && msg.chat.type !== 'private') {
+        return;
+    }
+    
     if (await quiz.handleQuestionCreation(msg, bot)) {
         return;
     }
