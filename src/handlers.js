@@ -1,7 +1,7 @@
 /**
  * handlers.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 03:12:11 UTC
+ * Created at: 2025-06-04 03:33:59 UTC
  */
 
 const { mainMenuButtons, subjectButtons, studySessionButtons, breakButtons, questionCreationCancelButton } = require('./buttons');
@@ -114,6 +114,46 @@ async function handleCallback(callbackQuery, bot) {
                 }
             })
         );
+        return;
+    }
+
+    if (data === 'confirm_choices') {
+        try {
+            await bot.deleteMessage(msg.chat.id, msg.message_id);
+        } catch (error) {
+            console.error('Error deleting message:', error);
+        }
+        await quiz.handleConfirmChoices(userId, msg.chat.id, bot, messageThreadId);
+        return;
+    }
+
+    if (data === 'retry_choices') {
+        try {
+            await bot.deleteMessage(msg.chat.id, msg.message_id);
+        } catch (error) {
+            console.error('Error deleting message:', error);
+        }
+        await quiz.handleRetryChoices(userId, msg.chat.id, bot, messageThreadId);
+        return;
+    }
+
+    if (data === 'confirm_answer') {
+        try {
+            await bot.deleteMessage(msg.chat.id, msg.message_id);
+        } catch (error) {
+            console.error('Error deleting message:', error);
+        }
+        await quiz.handleConfirmAnswer(userId, msg.chat.id, bot, messageThreadId);
+        return;
+    }
+
+    if (data === 'retry_answer') {
+        try {
+            await bot.deleteMessage(msg.chat.id, msg.message_id);
+        } catch (error) {
+            console.error('Error deleting message:', error);
+        }
+        await quiz.handleRetryAnswer(userId, msg.chat.id, bot, messageThreadId);
         return;
     }
 
@@ -296,11 +336,26 @@ async function handleCallback(callbackQuery, bot) {
             }
 
             quiz.cancelQuestionCreation(userId);
-            await bot.sendMessage(
+            const cancelMsg = await bot.sendMessage(
                 msg.chat.id,
                 'Creating a question CANCELLED.',
-                createMessageOptions(mainMenuButtons)
+                createMessageOptions({
+                    reply_markup: {
+                        inline_keyboard: [[
+                            { text: '➕ Create New Question', callback_data: ACTIONS.CREATE_QUESTION }
+                        ]]
+                    }
+                })
             );
+
+            // Delete the cancellation message after 15 seconds
+            setTimeout(async () => {
+                try {
+                    await bot.deleteMessage(msg.chat.id, cancelMsg.message_id);
+                } catch (error) {
+                    console.error('Error deleting cancellation message:', error);
+                }
+            }, 15000);
             break;
 
         case ACTIONS.CANCEL_STUDYING:
@@ -342,11 +397,12 @@ async function handleCallback(callbackQuery, bot) {
 
                     userState.questionData.subject = subject;
                     userState.state = 'WAITING_QUESTION';
-                    await bot.sendMessage(
+                    const botMsg = await bot.sendMessage(
                         msg.chat.id,
                         'Please type your question:',
                         createMessageOptions(questionCreationCancelButton)
                     );
+                    await quiz.addTempMessage(userId, botMsg.message_id);
                 } else {
                     // This is for starting a study session
                     if (sessionManager.lastSubjectMessage) {
