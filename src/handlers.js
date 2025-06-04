@@ -1,7 +1,7 @@
 /**
  * handlers.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 03:41:33 UTC
+ * Created at: 2025-06-04 03:53:24 UTC
  */
 
 const { mainMenuButtons, subjectButtons, studySessionButtons, breakButtons, questionCreationCancelButton } = require('./buttons');
@@ -294,7 +294,13 @@ async function handleCallback(callbackQuery, bot) {
                 await bot.sendMessage(
                     msg.chat.id,
                     `${userName} ended their review on ${session.subject}. Congrats ${userName}. If you want to start a study session again, just click the button below`,
-                    createMessageOptions(mainMenuButtons)
+                    createMessageOptions({
+                        reply_markup: {
+                            inline_keyboard: [[
+                                { text: '📚 Start Studying', callback_data: ACTIONS.START_STUDYING }
+                            ]]
+                        }
+                    })
                 );
                 sessionManager.endSession(userId);
             }
