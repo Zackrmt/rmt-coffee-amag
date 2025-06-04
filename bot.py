@@ -20,7 +20,7 @@ logging.basicConfig(
 
 # Add specific user and time information
 CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-04 16:25:22"
+STARTUP_TIME = "2025-06-04 16:46:55"
 
 logger = logging.getLogger(__name__)
 
@@ -127,14 +127,18 @@ class TelegramBot:
             [InlineKeyboardButton("Start Creating Questions ❓", callback_data='create_question')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        message = await update.message.reply_text(
-            'Welcome to MTLE Study Bot! Choose an option:',
-            reply_markup=reply_markup
-        )
-        
-        # Store the message ID
-        context.user_data['last_message_id'] = message.message_id
-        return CHOOSING_MAIN_MENU
+        try:
+            message = await update.message.reply_text(
+                'Welcome to MTLE Study Bot! Choose an option:',
+                reply_markup=reply_markup
+            )
+            
+            # Store the message ID
+            context.user_data['last_message_id'] = message.message_id
+            return CHOOSING_MAIN_MENU
+        except Exception as e:
+            logger.error(f"Error in start command: {str(e)}")
+            return ConversationHandler.END
 
     async def ask_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Ask if user wants to set a study goal."""
@@ -277,7 +281,7 @@ class TelegramBot:
             context.user_data['last_message_id'] = message.message_id
             return STUDYING
         except Exception as e:
-            logger.error(f"Error sending message: {str(e)}")
+            logger.error(f"Error starting study session: {str(e)}")
             return ConversationHandler.END
 
     async def handle_break(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -308,7 +312,7 @@ class TelegramBot:
                 context.user_data['last_message_id'] = message.message_id
                 return ON_BREAK
             except Exception as e:
-                logger.error(f"Error sending message: {str(e)}")
+                logger.error(f"Error starting break: {str(e)}")
                 return ConversationHandler.END
         else:  # end_break
             session.end_break()
@@ -326,7 +330,7 @@ class TelegramBot:
                 context.user_data['last_message_id'] = message.message_id
                 return STUDYING
             except Exception as e:
-                logger.error(f"Error sending message: {str(e)}")
+                logger.error(f"Error ending break: {str(e)}")
                 return ConversationHandler.END
 
     async def generate_progress_image(self, user_name: str, study_time: datetime.timedelta, 
@@ -737,4 +741,100 @@ class TelegramBot:
 
 def main():
     """Start the bot."""
-    # Add startup
+    # Add startup logging
+    logger.info(f"Bot starting at {STARTUP_TIME} UTC")
+    logger.info(f"Started by user: {CURRENT_USER}")
+    logger.info("Initializing bot application...")
+    
+    # Start health check server with port binding
+    port = int(os.environ.get('PORT', 10000))
+    logger.info(f"Starting health check server on port {port}")
+    start_health_server()
+    
+    # Create the Application and pass it your bot's token.
+    application = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).build()
+    
+    bot = TelegramBot()
+    logger.info("Setting up conversation handlers...")
+    
+    # Create conversation handler with states
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', bot.start)],
+        states={
+            CHOOSING_MAIN_MENU: [
+                CallbackQueryHandler(bot.ask_goal, pattern='^start_studying$'),
+                CallbackQueryHandler(bot.start_creating_question, pattern='^create_question$')
+            ],
+            SETTING_GOAL: [
+                CallbackQueryHandler(bot.handle_goal_response, pattern='^(set_goal|skip_goal)$')
+            ],
+            CONFIRMING_GOAL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.confirm_goal),
+                CallbackQueryHandler(bot.show_subject_selection, pattern='^confirm_goal$'),
+                CallbackQueryHandler(bot.handle_goal_response, pattern='^set_goal$')
+            ],
+            CHOOSING_SUBJECT: [
+                CallbackQueryHandler(bot.start_studying, pattern='^subject_')
+            ],
+            STUDYING: [
+                CallbackQueryHandler(bot.handle_break, pattern='^start_break$'),
+                CallbackQueryHandler(bot.end_session, pattern='^end_session$')
+            ],
+            ON_BREAK: [
+                CallbackQueryHandler(bot.handle_break, pattern='^end_break$'),
+                CallbackQueryHandler(bot.end_session, pattern='^end_session$')
+            ],
+            CREATING_QUESTION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_question_text),
+                CallbackQueryHandler(bot.start, pattern='^cancel_question$')
+            ],
+            CONFIRMING_QUESTION: [
+                CallbackQueryHandler(bot.handle_question_confirmation)
+            ],
+            SETTING_CHOICES: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_choice)
+            ],
+            SETTING_CORRECT_ANSWER: [
+                CallbackQueryHandler(bot.handle_correct_answer, pattern='^correct_')
+            ],
+            SETTING_EXPLANATION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_explanation)
+            ]
+        },
+        fallbacks=[CommandHandler('start', bot.start)]
+    )
+
+    # Add handlers
+    application.add_handler(conv_handler)
+    
+    # Add standalone handlers
+    application.add_handler(CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_'))
+    application.add_handler(CallbackQueryHandler(bot.handle_share_response, pattern='^(share_progress|no_share)$'))
+
+    # Error handler
+    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Log errors caused by Updates."""
+        logger.error("Exception while handling an update:", exc_info=context.error)
+        if isinstance(update, Update) and update.effective_message:
+            error_message = "An error occurred while processing your request. Please try again."
+            try:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=error_message
+                )
+            except Exception as e:
+                logger.error(f"Error sending error message: {str(e)}")
+
+    application.add_error_handler(error_handler)
+    
+    # Start the Bot
+    logger.info("Starting bot polling...")
+    try:
+        application.run_polling()
+        logger.info("Bot polling started successfully")
+    except Exception as e:
+        logger.error(f"Error starting bot: {str(e)}")
+        raise
+
+if __name__ == '__main__':
+    main()
