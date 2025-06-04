@@ -1,7 +1,7 @@
 /**
  * quiz.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 03:10:20 UTC
+ * Created at: 2025-06-04 03:30:52 UTC
  */
 
 const { mainMenuButtons, questionCreationCancelButton } = require('./buttons');
@@ -16,8 +16,59 @@ class Quiz {
     startQuestionCreation(userId) {
         this.userState.set(userId, {
             state: 'WAITING_SUBJECT',
-            questionData: {}
+            questionData: {},
+            tempMessages: [] // Array to store message IDs to be deleted
         });
+    }
+
+    async cleanupMessages(chatId, bot) {
+        const userStates = Array.from(this.userState.values());
+        for (const state of userStates) {
+            if (state.tempMessages && state.tempMessages.length > 0) {
+                for (const messageId of state.tempMessages) {
+                    try {
+                        await bot.deleteMessage(chatId, messageId);
+                    } catch (error) {
+                        console.error('Error deleting message:', error);
+                    }
+                }
+                state.tempMessages = [];
+            }
+        }
+    }
+
+    async addTempMessage(userId, messageId) {
+        const userState = this.userState.get(userId);
+        if (userState) {
+            if (!userState.tempMessages) {
+                userState.tempMessages = [];
+            }
+            userState.tempMessages.push(messageId);
+        }
+    }
+
+    formatChoices(rawChoices) {
+        return rawChoices
+            .filter(choice => choice.trim() !== '')
+            .map((choice, index) => `${String.fromCharCode(97 + index)}) ${choice.trim()}`);
+    }
+
+    createChoiceConfirmationMessage(choices) {
+        let message = '<b>Are these the correct choices?</b>\n\n';
+        choices.forEach(choice => {
+            message += `${choice}\n`;
+        });
+        return message;
+    }
+
+    createAnswerConfirmationMessage(questionData, answer) {
+        let message = '<b>Please confirm:</b>\n\n';
+        message += `Question: ${questionData.question}\n\n`;
+        questionData.choices.forEach(choice => {
+            message += `${choice}\n`;
+        });
+        message += `\nSelected answer: ${answer.toUpperCase()}) ${questionData.choices.find(c => c.startsWith(answer + ')'))}`;
+        return message;
     }
 
     async handleQuestionCreation(msg, bot) {
@@ -31,6 +82,11 @@ class Quiz {
             return messageThreadId ? { ...options, message_thread_id: messageThreadId } : options;
         };
 
+        // Add message to temp list for cleanup
+        if (msg.message_id) {
+            await this.addTempMessage(userId, msg.message_id);
+        }
+
         // Handle image upload
         if (msg.photo && userState.state === 'WAITING_QUESTION') {
             userState.questionData.image = {
@@ -41,28 +97,21 @@ class Quiz {
             if (msg.caption) {
                 userState.questionData.question = msg.caption;
                 userState.state = 'WAITING_CHOICES';
-                await bot.sendMessage(
+                const botMsg = await bot.sendMessage(
                     msg.chat.id,
-                    'Please enter the choices (one per line) in format:\na) Choice 1\nb) Choice 2\nc) Choice 3\nd) Choice 4\ne) Choice 5',
+                    'Enter each choice on a new line (2-5 choices):',
                     messageOptions(questionCreationCancelButton)
                 );
+                await this.addTempMessage(userId, botMsg.message_id);
             } else {
-                await bot.sendMessage(
+                const botMsg = await bot.sendMessage(
                     msg.chat.id,
                     'Image received! Now, please type your question:',
                     messageOptions(questionCreationCancelButton)
                 );
+                await this.addTempMessage(userId, botMsg.message_id);
             }
             return true;
-        }
-
-        // Delete text messages immediately
-        if (!msg.photo) {
-            try {
-                await bot.deleteMessage(msg.chat.id, msg.message_id);
-            } catch (error) {
-                console.error('Error deleting message:', error);
-            }
         }
 
         switch (userState.state) {
@@ -70,56 +119,86 @@ class Quiz {
                 if (msg.text) {
                     userState.questionData.question = msg.text;
                     userState.state = 'WAITING_CHOICES';
-                    await bot.sendMessage(
+                    const botMsg = await bot.sendMessage(
                         msg.chat.id,
-                        'Please enter the choices (one per line) in format:\na) Choice 1\nb) Choice 2\nc) Choice 3\nd) Choice 4\ne) Choice 5',
+                        'Enter each choice on a new line (2-5 choices):',
                         messageOptions(questionCreationCancelButton)
                     );
-                } else if (!msg.photo) {
-                    await bot.sendMessage(
-                        msg.chat.id,
-                        'You can either:\n1. Type your question directly, or\n2. Send an image with your question in the caption',
-                        messageOptions(questionCreationCancelButton)
-                    );
+                    await this.addTempMessage(userId, botMsg.message_id);
                 }
                 return true;
 
             case 'WAITING_CHOICES':
-                const choices = msg.text.split('\n').map(choice => choice.trim());
-                if (choices.length < 2) {
-                    await bot.sendMessage(
+                if (!msg.text) return true;
+
+                const rawChoices = msg.text.split('\n');
+                if (rawChoices.length < 2 || rawChoices.length > 5) {
+                    const botMsg = await bot.sendMessage(
                         msg.chat.id,
-                        'Please provide at least 2 choices.',
+                        'Please provide between 2 and 5 choices.',
                         messageOptions(questionCreationCancelButton)
                     );
+                    await this.addTempMessage(userId, botMsg.message_id);
                     return true;
                 }
-                userState.questionData.choices = choices;
-                userState.state = 'WAITING_CORRECT_ANSWER';
-                await bot.sendMessage(
+
+                const formattedChoices = this.formatChoices(rawChoices);
+                userState.questionData.tempChoices = formattedChoices;
+
+                const confirmMsg = await bot.sendMessage(
                     msg.chat.id,
-                    'Which is the correct answer? (Enter the letter only: a, b, c, d, or e)',
-                    messageOptions(questionCreationCancelButton)
+                    this.createChoiceConfirmationMessage(formattedChoices),
+                    {
+                        ...messageOptions({}),
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '✅ Yes', callback_data: 'confirm_choices' },
+                                    { text: '❌ No, I need to correct', callback_data: 'retry_choices' }
+                                ]
+                            ]
+                        }
+                    }
                 );
+                await this.addTempMessage(userId, confirmMsg.message_id);
                 return true;
 
             case 'WAITING_CORRECT_ANSWER':
+                if (!msg.text) return true;
+
                 const answer = msg.text.toLowerCase();
-                if (!['a', 'b', 'c', 'd', 'e'].includes(answer)) {
-                    await bot.sendMessage(
+                const maxChoice = userState.questionData.choices.length;
+                const validAnswers = Array.from({ length: maxChoice }, (_, i) => String.fromCharCode(97 + i));
+                
+                if (!validAnswers.includes(answer)) {
+                    const botMsg = await bot.sendMessage(
                         msg.chat.id,
-                        'Please enter a valid answer letter (a, b, c, d, or e)',
+                        `Please enter a valid answer letter (${validAnswers.join(', ')})`,
                         messageOptions(questionCreationCancelButton)
                     );
+                    await this.addTempMessage(userId, botMsg.message_id);
                     return true;
                 }
-                userState.questionData.correctAnswer = answer;
-                userState.state = 'WAITING_EXPLANATION';
-                await bot.sendMessage(
+
+                userState.questionData.tempAnswer = answer;
+                const answerConfirmMsg = await bot.sendMessage(
                     msg.chat.id,
-                    'Please explain why this is the correct answer:',
-                    messageOptions(questionCreationCancelButton)
+                    this.createAnswerConfirmationMessage(userState.questionData, answer),
+                    {
+                        ...messageOptions({}),
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '✅ Yes', callback_data: 'confirm_answer' },
+                                    { text: '❌ No, I need to correct', callback_data: 'retry_answer' }
+                                ]
+                            ]
+                        }
+                    }
                 );
+                await this.addTempMessage(userId, answerConfirmMsg.message_id);
                 return true;
 
             case 'WAITING_EXPLANATION':
@@ -133,10 +212,14 @@ class Quiz {
                     createdAt: new Date().toISOString(),
                     messageThreadId
                 };
+
+                // Clean up all temporary messages
+                await this.cleanupMessages(msg.chat.id, bot);
+
                 this.questions.set(questionId, questionData);
                 this.userState.delete(userId);
                 
-                // Create and send the quiz message with image if exists
+                // Create and send the final quiz message
                 await this.sendQuizMessage(questionData, msg.chat.id, bot, messageThreadId);
                 return true;
         }
@@ -173,9 +256,12 @@ class Quiz {
     }
 
     createAnswerKeyboard(questionId, creatorId) {
-        const choices = ['a', 'b', 'c', 'd', 'e'].map(letter => ({
-            text: letter.toUpperCase(),
-            callback_data: `answer:${questionId}:${letter}`
+        const question = this.questions.get(questionId);
+        const numChoices = question ? question.choices.length : 5;
+        
+        const choices = Array.from({ length: numChoices }, (_, i) => ({
+            text: String.fromCharCode(65 + i),
+            callback_data: `answer:${questionId}:${String.fromCharCode(97 + i)}`
         }));
 
         const keyboard = {
@@ -378,7 +464,11 @@ class Quiz {
                 'Question has been deleted.',
                 {
                     ...options,
-                    reply_markup: mainMenuButtons.reply_markup
+                    reply_markup: {
+                        inline_keyboard: [[
+                            { text: '➕ Create New Question', callback_data: ACTIONS.CREATE_QUESTION }
+                        ]]
+                    }
                 }
             );
             return true;
@@ -388,6 +478,82 @@ class Quiz {
 
     cancelQuestionCreation(userId) {
         this.userState.delete(userId);
+    }
+
+    async handleConfirmChoices(userId, chatId, bot, messageThreadId) {
+        const userState = this.userState.get(userId);
+        if (!userState || !userState.questionData.tempChoices) return false;
+
+        userState.questionData.choices = userState.questionData.tempChoices;
+        delete userState.questionData.tempChoices;
+        userState.state = 'WAITING_CORRECT_ANSWER';
+
+        const botMsg = await bot.sendMessage(
+            chatId,
+            `Please enter the correct answer (${Array.from({ length: userState.questionData.choices.length }, 
+                (_, i) => String.fromCharCode(97 + i)).join(', ')}):`,
+            messageThreadId ? 
+                { message_thread_id: messageThreadId, ...questionCreationCancelButton } : 
+                questionCreationCancelButton
+        );
+        await this.addTempMessage(userId, botMsg.message_id);
+        return true;
+    }
+
+    async handleRetryChoices(userId, chatId, bot, messageThreadId) {
+        const userState = this.userState.get(userId);
+        if (!userState) return false;
+
+        userState.state = 'WAITING_CHOICES';
+        delete userState.questionData.tempChoices;
+
+        const botMsg = await bot.sendMessage(
+            chatId,
+            'Enter each choice on a new line (2-5 choices):',
+            messageThreadId ? 
+                { message_thread_id: messageThreadId, ...questionCreationCancelButton } : 
+                questionCreationCancelButton
+        );
+        await this.addTempMessage(userId, botMsg.message_id);
+        return true;
+    }
+
+    async handleConfirmAnswer(userId, chatId, bot, messageThreadId) {
+        const userState = this.userState.get(userId);
+        if (!userState || !userState.questionData.tempAnswer) return false;
+
+        userState.questionData.correctAnswer = userState.questionData.tempAnswer;
+        delete userState.questionData.tempAnswer;
+        userState.state = 'WAITING_EXPLANATION';
+
+        const botMsg = await bot.sendMessage(
+            chatId,
+            'Please explain why this is the correct answer:',
+            messageThreadId ? 
+                { message_thread_id: messageThreadId, ...questionCreationCancelButton } : 
+                questionCreationCancelButton
+        );
+        await this.addTempMessage(userId, botMsg.message_id);
+        return true;
+    }
+
+    async handleRetryAnswer(userId, chatId, bot, messageThreadId) {
+        const userState = this.userState.get(userId);
+        if (!userState) return false;
+
+        userState.state = 'WAITING_CORRECT_ANSWER';
+        delete userState.questionData.tempAnswer;
+
+        const botMsg = await bot.sendMessage(
+            chatId,
+            `Please enter the correct answer (${Array.from({ length: userState.questionData.choices.length }, 
+                (_, i) => String.fromCharCode(97 + i)).join(', ')}):`,
+            messageThreadId ? 
+                { message_thread_id: messageThreadId, ...questionCreationCancelButton } : 
+                questionCreationCancelButton
+        );
+        await this.addTempMessage(userId, botMsg.message_id);
+        return true;
     }
 }
 
