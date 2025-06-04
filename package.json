@@ -8,7 +8,7 @@
     "dev": "nodemon src/bot.js"
   },
   "author": "Zackrmt",
-  "created": "2025-06-04 01:44:19 UTC",
+  "created": "2025-06-04 02:04:34 UTC",
   "dependencies": {
     "dotenv": "^16.0.3",
     "node-telegram-bot-api": "^0.61.0"
