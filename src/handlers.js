@@ -1,7 +1,7 @@
 /**
  * handlers.js
  * Created by: Zackrmt
- * Created at: 2025-06-04 04:39:46 UTC
+ * Created at: 2025-06-04 12:50:43 UTC
  */
 
 const { mainMenuButtons, subjectButtons, studySessionButtons, breakButtons, questionCreationCancelButton } = require('./buttons');
@@ -404,9 +404,13 @@ async function handleCallback(callbackQuery, bot) {
 
         case ACTIONS.CANCEL_QUESTION:
             try {
+                // First clean up all temporary messages stored during question creation
+                await quiz.cleanupMessages(msg.chat.id, bot);
+                
+                // Then delete the current message (the one with the Cancel button)
                 await bot.deleteMessage(msg.chat.id, msg.message_id);
             } catch (error) {
-                console.error('Error deleting message:', error);
+                console.error('Error deleting messages:', error);
             }
 
             quiz.cancelQuestionCreation(userId);
