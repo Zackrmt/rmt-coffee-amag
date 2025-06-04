@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: study-bot
+    name: rmt-coffee-amag
     env: node
     buildCommand: npm install
     startCommand: npm start
