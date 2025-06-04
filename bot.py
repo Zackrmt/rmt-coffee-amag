@@ -2,6 +2,8 @@ import os
 import logging
 import datetime
 import asyncio
+import signal
+import sys
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler,
@@ -20,9 +22,17 @@ logging.basicConfig(
 
 # Add specific user and time information
 CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-04 16:46:55"
+STARTUP_TIME = "2025-06-04 16:57:18"
 
 logger = logging.getLogger(__name__)
+
+# Signal handler for graceful shutdown
+def signal_handler(sig, frame):
+    logger.info("Received shutdown signal, cleaning up...")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 # States for conversation handler
 (CHOOSING_MAIN_MENU, SETTING_GOAL, CONFIRMING_GOAL, CHOOSING_SUBJECT, 
@@ -110,9 +120,8 @@ class TelegramBot:
         self.questions: Dict[int, Question] = {}
         self.current_questions: Dict[int, Question] = {}
 
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Send main menu message when the command /start is issued."""
-        # Delete previous message if it exists
+    async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Clean up any existing messages."""
         if context.user_data.get('last_message_id'):
             try:
                 await context.bot.delete_message(
@@ -120,7 +129,11 @@ class TelegramBot:
                     message_id=context.user_data['last_message_id']
                 )
             except Exception as e:
-                logger.error(f"Error deleting message: {str(e)}")
+                logger.debug(f"Error deleting message: {str(e)}")
+
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Send main menu message when the command /start is issued."""
+        await self.cleanup_messages(update, context)
 
         keyboard = [
             [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
@@ -145,11 +158,7 @@ class TelegramBot:
         query = update.callback_query
         await query.answer()
 
-        # Delete the previous message
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message: {str(e)}")
+        await self.cleanup_messages(update, context)
 
         # Create new study session
         self.study_sessions[update.effective_user.id] = StudySession()
@@ -178,11 +187,7 @@ class TelegramBot:
         query = update.callback_query
         await query.answer()
 
-        # Delete the previous message
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message: {str(e)}")
+        await self.cleanup_messages(update, context)
 
         if query.data == 'set_goal':
             try:
@@ -229,10 +234,7 @@ class TelegramBot:
         query = update.callback_query
         if query:
             await query.answer()
-            try:
-                await query.message.delete()
-            except Exception as e:
-                logger.error(f"Error deleting message: {str(e)}")
+            await self.cleanup_messages(update, context)
 
         keyboard = [[InlineKeyboardButton(subject, callback_data=f"subject_{code}")] 
                    for subject, code in SUBJECTS.items()]
@@ -254,10 +256,7 @@ class TelegramBot:
         """Start the study session."""
         query = update.callback_query
         await query.answer()
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message: {str(e)}")
+        await self.cleanup_messages(update, context)
 
         subject_code = query.data.replace('subject_', '')
         user = update.effective_user
@@ -288,10 +287,7 @@ class TelegramBot:
         """Handle break actions."""
         query = update.callback_query
         await query.answer()
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message: {str(e)}")
+        await self.cleanup_messages(update, context)
 
         user = update.effective_user
         session = self.study_sessions.get(user.id)
@@ -389,10 +385,7 @@ class TelegramBot:
         """End the study session and show summary."""
         query = update.callback_query
         await query.answer()
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message: {str(e)}")
+        await self.cleanup_messages(update, context)
 
         user = update.effective_user
         session = self.study_sessions.get(user.id)
@@ -462,11 +455,7 @@ class TelegramBot:
         """Handle the response to sharing progress."""
         query = update.callback_query
         await query.answer()
-
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message: {str(e)}")
+        await self.cleanup_messages(update, context)
 
         if query.data == 'share_progress':
             try:
@@ -514,10 +503,7 @@ class TelegramBot:
         """Start the question creation process."""
         query = update.callback_query
         await query.answer()
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message: {str(e)}")
+        await self.cleanup_messages(update, context)
 
         keyboard = [[InlineKeyboardButton("Cancel", callback_data='cancel_question')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -564,10 +550,7 @@ class TelegramBot:
         """Handle the confirmation of the question text."""
         query = update.callback_query
         await query.answer()
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message: {str(e)}")
+        await self.cleanup_messages(update, context)
 
         if query.data == 'confirm_question':
             try:
@@ -645,10 +628,7 @@ class TelegramBot:
         """Handle the selection of correct answer."""
         query = update.callback_query
         await query.answer()
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message: {str(e)}")
+        await self.cleanup_messages(update, context)
 
         user = update.effective_user
         question = self.current_questions.get(user.id)
@@ -749,8 +729,13 @@ def main():
     # Start health check server with port binding
     port = int(os.environ.get('PORT', 10000))
     logger.info(f"Starting health check server on port {port}")
-    start_health_server()
-    
+    try:
+        start_health_server()
+        logger.info("Health check server started successfully")
+    except Exception as e:
+        logger.error(f"Error starting health check server: {str(e)}")
+        # Continue anyway as this is not critical
+        pass    
     # Create the Application and pass it your bot's token.
     application = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).build()
     
@@ -801,7 +786,11 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_explanation)
             ]
         },
-        fallbacks=[CommandHandler('start', bot.start)]
+        fallbacks=[
+            CommandHandler('start', bot.start),
+            CallbackQueryHandler(bot.handle_share_response, pattern='^(share_progress|no_share)$'),
+            CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_')
+        ]
     )
 
     # Add handlers
@@ -811,26 +800,54 @@ def main():
     application.add_handler(CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_'))
     application.add_handler(CallbackQueryHandler(bot.handle_share_response, pattern='^(share_progress|no_share)$'))
 
-    # Error handler
+    # Error handler with improved message cleanup
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log errors caused by Updates."""
         logger.error("Exception while handling an update:", exc_info=context.error)
         if isinstance(update, Update) and update.effective_message:
             error_message = "An error occurred while processing your request. Please try again."
             try:
-                await context.bot.send_message(
+                # Clean up any existing messages
+                if context.user_data.get('last_message_id'):
+                    try:
+                        await context.bot.delete_message(
+                            chat_id=update.effective_chat.id,
+                            message_id=context.user_data['last_message_id']
+                        )
+                    except Exception as e:
+                        logger.debug(f"Error cleaning up message: {str(e)}")
+                
+                # Send error message
+                message = await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=error_message
                 )
+                context.user_data['last_message_id'] = message.message_id
             except Exception as e:
                 logger.error(f"Error sending error message: {str(e)}")
 
+    # Add error handler
     application.add_error_handler(error_handler)
+    
+    # Register shutdown handlers
+    def shutdown_handler():
+        """Handle graceful shutdown."""
+        logger.info("Shutting down bot...")
+        # Cleanup any resources
+        try:
+            # Add any cleanup code here
+            pass
+        except Exception as e:
+            logger.error(f"Error during shutdown: {str(e)}")
+
+    # Register the shutdown handler
+    import atexit
+    atexit.register(shutdown_handler)
     
     # Start the Bot
     logger.info("Starting bot polling...")
     try:
-        application.run_polling()
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
         logger.info("Bot polling started successfully")
     except Exception as e:
         logger.error(f"Error starting bot: {str(e)}")
