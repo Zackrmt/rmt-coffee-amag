@@ -742,7 +742,7 @@ def main():
     bot = TelegramBot()
     logger.info("Setting up conversation handlers...")
     
-      conv_handler = ConversationHandler(
+conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', bot.start)],
         states={
             CHOOSING_MAIN_MENU: [
