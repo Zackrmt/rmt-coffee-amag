@@ -1,0 +1,3 @@
+python-telegram-bot[webhooks]>=20.0
+pillow==10.0.0
+python-dotenv==1.0.0
