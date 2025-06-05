@@ -24,7 +24,7 @@ logging.basicConfig(
 
 # Add specific user and time information
 CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-05 17:59:14
+STARTUP_TIME = "2025-06-05 17:59:14"
 
 # Set timezone configurations
 MANILA_TZ = pytz.timezone('Asia/Manila')
