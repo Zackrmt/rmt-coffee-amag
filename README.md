@@ -1,57 +1,50 @@
-# MTLE Study Bot
+# MTLE 2025 Study Bot
 
-A Telegram bot for tracking study sessions and creating study questions.
+A Telegram bot for tracking study sessions and progress.
 
 ## Features
 
-- Track study sessions with breaks
-- Set study goals
-- Generate progress images
-- Create and share study questions
-- Support for multiple subjects
+- Study session tracking
+- Break management
+- Progress analytics
+- Visual dashboard
+- Study reminders
+- Goal setting
 
 ## Setup
 
-1. Clone the repository
-```bash
-git clone https://github.com/Zackrmt/rmt-coffee-amag.git
-cd rmt-coffee-amag
-```
-
-2. Create and activate virtual environment
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies
+1. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Set up environment variables
-- Create a `.env` file
-- Add your Telegram bot token: `TELEGRAM_BOT_TOKEN=your_bot_token_here`
+2. Create `.env` file with:
+```
+BOT_TOKEN=your_telegram_bot_token
+ADMIN_IDS=123456789,987654321
+DEBUG_MODE=False
+```
 
-5. Add required fonts
-- Download Poppins font files (Bold, Light, SemiBold)
-- Place them in the project root directory
-
-6. Run the bot
+3. Run the bot:
 ```bash
 python bot.py
 ```
 
 ## Usage
 
-1. Start the bot with `/start`
-2. Choose to start studying or create questions
-3. Follow the prompts to:
-   - Set study goals
-   - Track study sessions
-   - Create study questions
-   - Review and answer questions
+- `/start` - Begin using the bot
+- `/study <subject>` - Start study session
+- `/break` - Take a break
+- `/end` - End current session
+- `/stats` - View study statistics
+- `/dashboard` - Generate visual dashboard
 
-## Contributing
+## Development
 
-Feel free to submit issues and enhancement requests!
+Current Version: 2.0.0
+Last Updated: 2025-06-05 06:15:05 UTC
+Created by: Eli
+
+## License
+
+MIT License
