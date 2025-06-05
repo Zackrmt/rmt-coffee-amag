@@ -395,13 +395,13 @@ class TelegramBot:
 
 class TelegramBot:
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Send main menu message when the command /start is issued."""
-    await self.cleanup_messages(update, context)
-    user = update.effective_user
+        """Send main menu message when the command /start is issued."""
+        await self.cleanup_messages(update, context)
     
     # Store the thread_id if message is in a topic
-    if update.message and update.message.is_topic_message:
+    if update.message and update.message.message_thread_id:
         context.user_data['thread_id'] = update.message.message_thread_id
+        logger.info(f"Starting bot in topic {update.message.message_thread_id}")
 
     welcome_message = (
         f"Hello {user.first_name}! 👋\n\n"
