@@ -10,3 +10,8 @@ services:
         value: 3.11.11
       - key: PORT
         value: 10000
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+    autoDeploy: true
