@@ -35,3 +35,27 @@ ENV/
 
 # Logs
 *.log
+
+# Data files
+study_data.json
+questions.json
+*.json
+
+# Generated files
+dashboard.png
+*.png
+*.jpg
+*.jpeg
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+
+# Debug files
+debug/
+*.debug
