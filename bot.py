@@ -32,14 +32,15 @@ PST_TZ = pytz.timezone('US/Pacific')
 
 logger = logging.getLogger(__name__)
 
-# In bot.py, modify the generate_progress_image function:
+# In bot.py, update the generate_progress_image function:
 
 try:
-    # Try system fonts first
-    title_font = ImageFont.truetype("Poppins-Bold", 80)
-    main_font = ImageFont.truetype("Poppins", 60)
-except:
-    # Fallback to default font if Poppins is not available
+    # Try to use installed Poppins fonts
+    title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 80)
+    main_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Light.ttf", 60)
+except Exception as e:
+    logger.warning(f"Error loading Poppins fonts: {e}")
+    # Fallback to default system font if Poppins is not available
     title_font = ImageFont.load_default()
     main_font = ImageFont.load_default()
 
