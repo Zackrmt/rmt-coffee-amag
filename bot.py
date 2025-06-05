@@ -252,7 +252,7 @@ class TelegramBot:
         self.study_sessions: Dict[int, StudySession] = {}
         self.questions: Dict[int, Question] = {}
         self.current_questions: Dict[int, Question] = {}
-        self.startup_time = "2025-06-05 17:08:42"  # Updated to current UTC time
+        self.startup_time = "2025-06-05 17:20:58"  # Updated to current UTC time
         self.current_user = "Zackrmt"
 
     async def send_bot_message(
