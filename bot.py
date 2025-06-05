@@ -256,6 +256,9 @@ class TelegramBot:
         self.study_sessions: Dict[int, StudySession] = {}
         self.questions: Dict[int, Question] = {}
         self.current_questions: Dict[int, Question] = {}
+        self.startup_time = "2025-06-05 17:40:07"  # Updated to current UTC time
+        self.current_user = "Zackrmt"
+        self._start = None  # Initialize _start attribute
 
     async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Clean up any existing messages."""
@@ -296,31 +299,38 @@ class TelegramBot:
             logger.error(f"Error sending message: {str(e)}")
             return None
 
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Start command handler."""
-        await self.cleanup_messages(update, context)
-        
-        if update.message and update.message.message_thread_id:
-            context.user_data['thread_id'] = update.message.message_thread_id
-            logger.info(f"Starting bot in topic {update.message.message_thread_id}")
+    @property
+    def start(self):
+        """Property to ensure start method is always available."""
+        if self._start is None:
+            async def _start_impl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+                """Start command handler."""
+                await self.cleanup_messages(update, context)
+                
+                if update.message and update.message.message_thread_id:
+                    context.user_data['thread_id'] = update.message.message_thread_id
+                    logger.info(f"Starting bot in topic {update.message.message_thread_id}")
 
-        keyboard = [
-            [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
-            [InlineKeyboardButton("Create Questions ❓", callback_data='create_question')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        try:
-            await self.send_bot_message(
-                context,
-                update.effective_chat.id,
-                'Welcome to MTLE Study Bot! Choose an option:',
-                reply_markup=reply_markup
-            )
-            return CHOOSING_MAIN_MENU
-        except Exception as e:
-            logger.error(f"Error in start command: {str(e)}")
-            return ConversationHandler.END
+                keyboard = [
+                    [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
+                    [InlineKeyboardButton("Create Questions ❓", callback_data='create_question')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                try:
+                    await self.send_bot_message(
+                        context,
+                        update.effective_chat.id,
+                        'Welcome to MTLE Study Bot! Choose an option:',
+                        reply_markup=reply_markup
+                    )
+                    return CHOOSING_MAIN_MENU
+                except Exception as e:
+                    logger.error(f"Error in start command: {str(e)}")
+                    return ConversationHandler.END
+
+            self._start = _start_impl
+        return self._start
 
     async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Enhanced cleanup of messages including clicked buttons."""
