@@ -252,7 +252,7 @@ class TelegramBot:
         self.study_sessions: Dict[int, StudySession] = {}
         self.questions: Dict[int, Question] = {}
         self.current_questions: Dict[int, Question] = {}
-        self.startup_time = "2025-06-05 15:33:54"  # Using your provided UTC time
+        self.startup_time = "2025-06-05 17:08:42"  # Updated to current UTC time
         self.current_user = "Zackrmt"
 
     async def send_bot_message(
@@ -282,12 +282,16 @@ class TelegramBot:
             return None
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Start the bot conversation."""
-        user = update.effective_user
+        """Send main menu message when the command /start is issued."""
+        await self.cleanup_messages(update, context)
         
-        # Store the topic ID if available
-        if update.message and update.message.is_topic_message:
+        # Store the thread_id if message is in a topic
+        if update.message and update.message.message_thread_id:
             context.user_data['thread_id'] = update.message.message_thread_id
+            logger.info(f"Starting bot in topic {update.message.message_thread_id}")
+
+        # Get user info for personalized welcome
+        user = update.effective_user
 
         welcome_message = (
             f"Hello {user.first_name}! 👋\n\n"
@@ -310,11 +314,10 @@ class TelegramBot:
                 reply_markup=reply_markup
             )
             return CHOOSING_MAIN_MENU
-
         except Exception as e:
             logger.error(f"Error in start: {str(e)}")
             return ConversationHandler.END
-
+            
     async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Enhanced cleanup of messages including clicked buttons."""
         if 'messages_to_delete' in context.user_data:
