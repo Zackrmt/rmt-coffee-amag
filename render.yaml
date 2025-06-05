@@ -1,7 +1,7 @@
 services:
   - type: web
     name: mtle-study-bot
-    env: docker
+    runtime: docker
     region: singapore  # Closest to Manila
     plan: free
     healthCheckPath: /health
