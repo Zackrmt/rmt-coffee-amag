@@ -1,14 +1,9 @@
 services:
   - type: web
-    name: mtle-study-bot
-    runtime: docker
-    buildCommand: docker build -t study-bot .
-    startCommand: ""
-    region: singapore  # Closest to Manila
-    plan: free
+    name: study-bot
+    env: docker
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
-      - key: TELEGRAM_TOKEN
-        sync: false  # Will be set manually in Render dashboard
       - key: PORT
         value: 10000
