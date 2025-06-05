@@ -24,7 +24,7 @@ logging.basicConfig(
 
 # Add specific user and time information
 CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-05 16:34:58"
+STARTUP_TIME = "2025-06-05 17:59:14
 
 # Set timezone configurations
 MANILA_TZ = pytz.timezone('Asia/Manila')
@@ -256,7 +256,7 @@ class TelegramBot:
         self.study_sessions: Dict[int, StudySession] = {}
         self.questions: Dict[int, Question] = {}
         self.current_questions: Dict[int, Question] = {}
-        self.startup_time = "2025-06-05 17:45:39"  # Updated to current UTC time
+        self.startup_time = "2025-06-05 17:59:14"  # Updated to current UTC time
         self.current_user = "Zackrmt"
         self._start = None  # Initialize _start attribute
 
@@ -304,7 +304,6 @@ class TelegramBot:
         """Property to ensure start method is always available."""
         if self._start is None:
             async def _start_impl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-                """Start command handler."""
                 await self.cleanup_messages(update, context)
                 
                 if update.message and update.message.message_thread_id:
@@ -1228,11 +1227,10 @@ async def generate_progress_image(
             )
             return ConversationHandler.END
 
-
 def main():
     """Start the bot."""
     # Add startup logging
-    startup_time = "2025-06-05 15:40:15"  # Current UTC time
+    startup_time = "2025-06-05 17:59:14"  # Current UTC time
     current_user = "Zackrmt"
     
     logger.info(f"Bot starting at {startup_time} UTC")
