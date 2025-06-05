@@ -256,7 +256,7 @@ class TelegramBot:
         self.study_sessions: Dict[int, StudySession] = {}
         self.questions: Dict[int, Question] = {}
         self.current_questions: Dict[int, Question] = {}
-        self.startup_time = "2025-06-05 17:40:07"  # Updated to current UTC time
+        self.startup_time = "2025-06-05 17:45:39"  # Updated to current UTC time
         self.current_user = "Zackrmt"
         self._start = None  # Initialize _start attribute
 
