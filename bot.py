@@ -19,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Constants
-TOKEN = 7514176467:AAER30CBSwtfin_zUV-QFYubHEV0dJIHIac
+TOKEN = "7514176467:AAER30CBSwtfin_zUV-QFYubHEV0dJIHIac"  # Correct - in quotes
 STUDY_DATA_FILE = 'study_data.json'
 QUESTIONS_FILE = 'questions.json'
 
