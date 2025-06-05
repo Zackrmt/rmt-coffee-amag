@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11.11-slim
 
 WORKDIR /app
 
@@ -14,7 +14,11 @@ COPY Poppins-SemiBold.ttf .
 # Copy the rest of the application
 COPY . .
 
-# Create health check endpoint
-EXPOSE 8080
+# Set environment variables
+ENV PORT=10000
+ENV PYTHONUNBUFFERED=1
+
+# Expose port for health check
+EXPOSE ${PORT}
 
 CMD ["python", "bot.py"]
