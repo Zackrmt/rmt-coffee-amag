@@ -2,18 +2,24 @@ services:
   - type: web
     name: study-bot
     env: python
-    region: ohio  # Added for better latency
-    plan: free    # Explicitly specify free plan
+    region: ohio
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     healthCheckPath: /health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
+      - key: BOT_TOKEN
+        sync: false  # Marks as secret
+      - key: ADMIN_IDS
+        sync: false  # Marks as secret
+      - key: DEBUG_MODE
+        value: "False"
       - key: PORT
         value: 10000
-      - key: BOT_TOKEN
-        value: "7514176467:AAER30CBSwtfin_zUV-QFYubHEV0dJIHIac"
+      - key: WEBHOOK_URL
+        sync: false  # Marks as secret
+      - key: PYTHON_VERSION
+        value: 3.11.11
       - key: TZ
         value: UTC
     autoDeploy: true
