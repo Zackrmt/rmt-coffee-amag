@@ -1194,7 +1194,7 @@ async def generate_progress_image(
 def main():
     """Start the bot."""
     # Add startup logging
-    startup_time = "2025-06-05 17:59:14"  # Current UTC time
+    startup_time = "2025-06-05 18:29:42"  # Current UTC time
     current_user = "Zackrmt"
     
     logger.info(f"Bot starting at {startup_time} UTC")
@@ -1218,7 +1218,7 @@ def main():
     
     # Updated conversation handler with all features
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', bot.start)],
+        entry_points=[CommandHandler('start', lambda u, c: bot.start(u, c))],
         states={
             CHOOSING_MAIN_MENU: [
                 CallbackQueryHandler(bot.ask_goal, pattern='^start_studying$'),
@@ -1271,7 +1271,7 @@ def main():
             ]
         },
         fallbacks=[
-            CommandHandler('start', bot.start),
+            CommandHandler('start', lambda u, c: bot.start(u, c)),
             CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$'),
             CallbackQueryHandler(bot.show_progress_image, pattern='^share_progress$'),
             CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_')
