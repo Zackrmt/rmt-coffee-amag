@@ -6,14 +6,16 @@ WORKDIR /app
 # Install system dependencies and create font directory
 RUN apt-get update && apt-get install -y \
     fontconfig \
+    wget \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /usr/share/fonts/truetype/poppins
 
-# Copy font files from current directory
-COPY Poppins-Bold.ttf Poppins-Light.ttf Poppins-SemiBold.ttf /usr/share/fonts/truetype/poppins/
-
-# Refresh font cache
-RUN fc-cache -f -v
+# Download Poppins fonts
+RUN wget -O Poppins-Bold.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf \
+    && wget -O Poppins-Light.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Light.ttf \
+    && wget -O Poppins-SemiBold.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-SemiBold.ttf \
+    && mv Poppins-*.ttf /usr/share/fonts/truetype/poppins/ \
+    && fc-cache -f -v
 
 # Copy requirements and install Python packages
 COPY requirements.txt .
