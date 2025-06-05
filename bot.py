@@ -24,7 +24,7 @@ logging.basicConfig(
 
 # Add specific user and time information
 CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-05 14:32:03"  # UTC time used only for logging
+STARTUP_TIME = "2025-06-05 16:34:58"
 
 # Set timezone configurations
 MANILA_TZ = pytz.timezone('Asia/Manila')
@@ -396,6 +396,7 @@ class TelegramBot:
 class TelegramBot:
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Send main menu message when the command /start is issued."""
+    await self.cleanup_messages(update, context)
     user = update.effective_user
     
     # Store the thread_id if message is in a topic
@@ -1043,29 +1044,36 @@ class TelegramBot:
             logger.error(f"Error ending session: {str(e)}")
             return ConversationHandler.END
 
-    async def generate_progress_image(
-        self, user_name: str, 
-        study_time: datetime.timedelta, 
-        break_time: datetime.timedelta
-    ) -> io.BytesIO:
-        """Generate a square progress image suitable for Instagram."""
-        # Create a square canvas (1080x1080 for Instagram)
-        width = height = 1080
-        image = Image.new('RGB', (width, height))
-        draw = ImageDraw.Draw(image)
+async def generate_progress_image(
+    self, user_name: str, 
+    study_time: datetime.timedelta, 
+    break_time: datetime.timedelta
+) -> io.BytesIO:
+    """Generate a square progress image suitable for Instagram."""
+    # Create a square canvas (1080x1080 for Instagram)
+    width = height = 1080
+    image = Image.new('RGB', (width, height))
+    draw = ImageDraw.Draw(image)
 
+    try:
+        # Try to use Poppins fonts from the app directory
+        title_font = ImageFont.truetype("/app/fonts/Poppins-Bold.ttf", 60)
+        subtitle_font = ImageFont.truetype("/app/fonts/Poppins-SemiBold.ttf", 40)
+        body_font = ImageFont.truetype("/app/fonts/Poppins-Light.ttf", 32)
+    except Exception as e:
+        logger.warning(f"Error loading fonts from app directory: {e}")
         try:
-            # Load Poppins fonts
-            title_font = ImageFont.truetype("Poppins-Bold.ttf", 60)
-            subtitle_font = ImageFont.truetype("Poppins-SemiBold.ttf", 40)
-            body_font = ImageFont.truetype("Poppins-Light.ttf", 32)
+            # Try system fonts directory as fallback
+            title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 60)
+            subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf", 40)
+            body_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Light.ttf", 32)
         except Exception as e:
-            logger.error(f"Error loading fonts: {e}")
-            # Fallback to default font if custom fonts fail
+            logger.error(f"Error loading system fonts: {e}")
+            # Final fallback to default font
             title_font = ImageFont.load_default()
             subtitle_font = title_font
             body_font = title_font
-
+            
         # Background colors (dark theme)
         background_color = "#1a1a1a"
         card_color = "#2d2d2d"
