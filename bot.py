@@ -19,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Constants
-TOKEN = 'your_telegram_bot_token'
+TOKEN = 7514176467:AAER30CBSwtfin_zUV-QFYubHEV0dJIHIac
 STUDY_DATA_FILE = 'study_data.json'
 QUESTIONS_FILE = 'questions.json'
 
