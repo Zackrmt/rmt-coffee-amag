@@ -32,8 +32,6 @@ PST_TZ = pytz.timezone('US/Pacific')
 
 logger = logging.getLogger(__name__)
 
-# In bot.py, update the generate_progress_image function:
-
 try:
     # Try to use installed Poppins fonts
     title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 80)
@@ -43,7 +41,7 @@ except Exception as e:
     # Fallback to default system font if Poppins is not available
     title_font = ImageFont.load_default()
     main_font = ImageFont.load_default()
-
+    
 # Signal handler for graceful shutdown
 def signal_handler(sig, frame):
     logger.info("Received shutdown signal, cleaning up...")
