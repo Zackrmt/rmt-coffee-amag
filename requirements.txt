@@ -1,4 +1,7 @@
-python-telegram-bot==20.3
+python-telegram-bot==20.7
 Pillow==10.0.0
+matplotlib==3.7.1
+pandas==2.0.3
 python-dotenv==1.0.0
-aiohttp==3.8.5
+asyncio==3.4.3
+pytz==2023.3
