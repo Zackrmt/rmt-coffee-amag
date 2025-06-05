@@ -247,13 +247,28 @@ class Question:
         return [msg_id for msg_id in self.messages_to_delete 
                 if msg_id not in messages_to_exclude]
 
+# Add specific user and time information
+CURRENT_USER = "Zackrmt"
+STARTUP_TIME = "2025-06-05 17:25:06"  # Updated timestamp
+
 class TelegramBot:
     def __init__(self):
         self.study_sessions: Dict[int, StudySession] = {}
         self.questions: Dict[int, Question] = {}
         self.current_questions: Dict[int, Question] = {}
-        self.startup_time = "2025-06-05 17:20:58"  # Updated to current UTC time
-        self.current_user = "Zackrmt"
+
+    async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Clean up any existing messages."""
+        if 'messages_to_delete' in context.user_data:
+            for msg_id in context.user_data['messages_to_delete']:
+                try:
+                    await context.bot.delete_message(
+                        chat_id=update.effective_chat.id,
+                        message_id=msg_id
+                    )
+                except Exception as e:
+                    logger.debug(f"Error deleting message {msg_id}: {str(e)}")
+            context.user_data['messages_to_delete'] = []
 
     async def send_bot_message(
         self, context: ContextTypes.DEFAULT_TYPE, 
@@ -282,42 +297,31 @@ class TelegramBot:
             return None
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Send main menu message when the command /start is issued."""
+        """Start command handler."""
         await self.cleanup_messages(update, context)
         
-        # Store the thread_id if message is in a topic
         if update.message and update.message.message_thread_id:
             context.user_data['thread_id'] = update.message.message_thread_id
             logger.info(f"Starting bot in topic {update.message.message_thread_id}")
-
-        # Get user info for personalized welcome
-        user = update.effective_user
-
-        welcome_message = (
-            f"Hello {user.first_name}! 👋\n\n"
-            "Welcome to your MTLE 2025 Study Bot! 📚\n"
-            "I'm here to help you stay focused and track your study progress.\n\n"
-            "What would you like to do?"
-        )
 
         keyboard = [
             [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
             [InlineKeyboardButton("Create Questions ❓", callback_data='create_question')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-
+        
         try:
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                welcome_message,
+                'Welcome to MTLE Study Bot! Choose an option:',
                 reply_markup=reply_markup
             )
             return CHOOSING_MAIN_MENU
         except Exception as e:
-            logger.error(f"Error in start: {str(e)}")
+            logger.error(f"Error in start command: {str(e)}")
             return ConversationHandler.END
-            
+
     async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Enhanced cleanup of messages including clicked buttons."""
         if 'messages_to_delete' in context.user_data:
