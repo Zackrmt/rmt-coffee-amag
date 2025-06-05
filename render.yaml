@@ -2,13 +2,11 @@ services:
   - type: web
     name: mtle-study-bot
     env: docker
-    region: singapore  # Choose the region closest to Manila
+    region: singapore  # Closest to Manila
     plan: free
     healthCheckPath: /health
     envVars:
       - key: TELEGRAM_TOKEN
-        sync: false  # This will be set manually in Render dashboard
-      - key: WEBHOOK_URL
-        sync: false  # This will be set manually in Render dashboard
+        sync: false  # Will be set manually in Render dashboard
       - key: PORT
         value: 10000
