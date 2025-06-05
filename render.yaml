@@ -1,17 +1,14 @@
 services:
   - type: web
-    name: study-bot
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
+    name: mtle-study-bot
+    env: docker
+    region: singapore  # Choose the region closest to Manila
+    plan: free
     healthCheckPath: /health
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
+      - key: TELEGRAM_TOKEN
+        sync: false  # This will be set manually in Render dashboard
+      - key: WEBHOOK_URL
+        sync: false  # This will be set manually in Render dashboard
       - key: PORT
         value: 10000
-      - key: TELEGRAM_TOKEN
-        sync: false
-      - key: WEBHOOK_URL
-        sync: false
-    autoDeploy: true
