@@ -410,42 +410,6 @@ class TelegramBot:
             logger.debug(f"Error deleting message: {str(e)}")
 
 class TelegramBot:
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Send main menu message when the command /start is issued."""
-        await self.cleanup_messages(update, context)
-        
-        # Store the thread_id if message is in a topic
-        if update.message and update.message.message_thread_id:
-            context.user_data['thread_id'] = update.message.message_thread_id
-            logger.info(f"Starting bot in topic {update.message.message_thread_id}")
-
-        user = update.effective_user
-
-        welcome_message = (
-            f"Hello {user.first_name}! 👋\n\n"
-            "Welcome to your MTLE 2025 Study Bot! 📚\n"
-            "I'm here to help you stay focused and track your study progress.\n\n"
-            "What would you like to do?"
-        )
-
-        keyboard = [
-            [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
-            [InlineKeyboardButton("Create Questions ❓", callback_data='create_question')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        try:
-            await self.send_bot_message(
-                context,
-                update.effective_chat.id,
-                welcome_message,
-                reply_markup=reply_markup
-            )
-            return CHOOSING_MAIN_MENU
-        except Exception as e:
-            logger.error(f"Error in start: {str(e)}")
-            return ConversationHandler.END
-
     async def ask_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Start study session with goal setting."""
         query = update.callback_query
