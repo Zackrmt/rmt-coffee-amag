@@ -495,7 +495,7 @@ class TelegramBot:
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            f"📚 Study Session Started!\nSubject: {subject_name}",
+            f"⏳ Study Session Started!\nSubject: {subject_name}",
             should_delete=False
         )
         
@@ -632,7 +632,7 @@ class TelegramBot:
             summary_msg = await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                f"📚 Study Session Summary\nSubject: {session.subject}",
+                f"⌛Study Session Ended",
                 should_delete=False
             )
             
