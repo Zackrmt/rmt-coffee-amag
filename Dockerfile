@@ -27,6 +27,7 @@ COPY . .
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PORT=10000
+ENV HEALTH_CHECK_PORT=10001
 
 # Run the bot
 CMD ["python", "bot.py"]
