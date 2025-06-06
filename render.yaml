@@ -7,5 +7,11 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: HEALTH_CHECK_PORT
+        value: 10001
+      - key: TZ
+        value: Asia/Manila
       - key: PYTHON_VERSION
         value: 3.11.0
