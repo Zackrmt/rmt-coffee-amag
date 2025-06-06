@@ -1167,24 +1167,15 @@ class TelegramBot:
             )
             return ConversationHandler.END
 
-
 def main():
     """Start the bot."""
     # Add startup logging
-    startup_time = "2025-06-06 07:49:26"  # Current UTC time
+    startup_time = "2025-06-06 08:02:14"  # Current UTC time
     current_user = "Zackrmt"
     
     logger.info(f"Bot starting at {startup_time} UTC")
     logger.info(f"Started by user: {current_user}")
     logger.info("Initializing bot application...")
-    
-    # Health check server setup
-    port = int(os.environ.get('PORT', 10000))
-    try:
-        start_health_server()
-        logger.info("Health check server started successfully")
-    except Exception as e:
-        logger.error(f"Error starting health check server: {str(e)}")
 
     # Create the Application and pass it your bot's token.
     application = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).build()
@@ -1281,12 +1272,34 @@ def main():
     # Start the Bot with webhook if URL is provided, otherwise use polling
     webhook_url = os.environ.get('WEBHOOK_URL')
     if webhook_url:
+        # Use a different port for the webhook
+        webhook_port = int(os.environ.get('PORT', 10000))
+        
+        # Start health check server on a different port
+        try:
+            health_port = webhook_port + 1  # Use next available port
+            start_health_server(port=health_port)
+            logger.info(f"Health check server started successfully on port {health_port}")
+        except Exception as e:
+            logger.error(f"Error starting health check server: {str(e)}")
+            # Continue anyway as this is not critical
+        
+        # Start webhook
         application.run_webhook(
             listen="0.0.0.0",
-            port=port,
+            port=webhook_port,
             webhook_url=webhook_url
         )
     else:
+        # Start health check server first
+        try:
+            health_port = int(os.environ.get('PORT', 10000))
+            start_health_server(port=health_port)
+            logger.info("Health check server started successfully")
+        except Exception as e:
+            logger.error(f"Error starting health check server: {str(e)}")
+        
+        # Start polling
         application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
