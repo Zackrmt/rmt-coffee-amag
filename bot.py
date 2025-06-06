@@ -24,7 +24,7 @@ logging.basicConfig(
 
 # Add specific user and time information
 CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-05 17:59:14"
+STARTUP_TIME = "2025-06-06 07:41:23"
 
 # Set timezone configurations
 MANILA_TZ = pytz.timezone('Asia/Manila')
@@ -247,57 +247,14 @@ class Question:
         return [msg_id for msg_id in self.messages_to_delete 
                 if msg_id not in messages_to_exclude]
 
-# Add specific user and time information
-CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-05 17:25:06"  # Updated timestamp
-
 class TelegramBot:
     def __init__(self):
         self.study_sessions: Dict[int, StudySession] = {}
         self.questions: Dict[int, Question] = {}
         self.current_questions: Dict[int, Question] = {}
-        self.startup_time = "2025-06-05 17:59:14"  # Updated to current UTC time
+        self.startup_time = "2025-06-06 07:44:13"
         self.current_user = "Zackrmt"
-        self._start = None  # Initialize _start attribute
-
-    async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Clean up any existing messages."""
-        if 'messages_to_delete' in context.user_data:
-            for msg_id in context.user_data['messages_to_delete']:
-                try:
-                    await context.bot.delete_message(
-                        chat_id=update.effective_chat.id,
-                        message_id=msg_id
-                    )
-                except Exception as e:
-                    logger.debug(f"Error deleting message {msg_id}: {str(e)}")
-            context.user_data['messages_to_delete'] = []
-
-    async def send_bot_message(
-        self, context: ContextTypes.DEFAULT_TYPE, 
-        chat_id: int, text: str, 
-        reply_markup: InlineKeyboardMarkup = None,
-        should_delete: bool = True
-    ) -> int:
-        """Send a message and return its ID."""
-        try:
-            message = await context.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                reply_markup=reply_markup,
-                message_thread_id=context.user_data.get('thread_id')
-            )
-            
-            if should_delete:
-                if 'messages_to_delete' not in context.user_data:
-                    context.user_data['messages_to_delete'] = []
-                context.user_data['messages_to_delete'].append(message.message_id)
-            
-            return message.message_id
-            
-        except Exception as e:
-            logger.error(f"Error sending message: {str(e)}")
-            return None
+        self._start = None
 
     @property
     def start(self):
@@ -357,6 +314,32 @@ class TelegramBot:
                     logger.debug(f"Error removing buttons {msg_id}: {str(e)}")
             context.user_data['clicked_buttons'] = []
 
+    async def send_bot_message(
+        self, context: ContextTypes.DEFAULT_TYPE, 
+        chat_id: int, text: str, 
+        reply_markup: InlineKeyboardMarkup = None,
+        should_delete: bool = True
+    ) -> int:
+        """Send a message and return its ID."""
+        try:
+            message = await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=reply_markup,
+                message_thread_id=context.user_data.get('thread_id')
+            )
+            
+            if should_delete:
+                if 'messages_to_delete' not in context.user_data:
+                    context.user_data['messages_to_delete'] = []
+                context.user_data['messages_to_delete'].append(message.message_id)
+            
+            return message.message_id
+            
+        except Exception as e:
+            logger.error(f"Error sending message: {str(e)}")
+            return None
+
     async def mark_button_clicked(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Mark a button as clicked for cleanup."""
         if update.callback_query and update.callback_query.message:
@@ -372,17 +355,14 @@ class TelegramBot:
         if query:
             await query.answer()
         
-        # Clean up all temporary messages
         await self.cleanup_messages(update, context)
         
-        # Clear any ongoing session or question data
         user_id = update.effective_user.id
         if user_id in self.study_sessions:
             del self.study_sessions[user_id]
         if user_id in self.current_questions:
             del self.current_questions[user_id]
         
-        # Return to main menu
         keyboard = [
             [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
             [InlineKeyboardButton("Create Questions ❓", callback_data='create_question')]
@@ -409,7 +389,6 @@ class TelegramBot:
         except Exception as e:
             logger.debug(f"Error deleting message: {str(e)}")
 
-class TelegramBot:
     async def ask_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Start study session with goal setting."""
         query = update.callback_query
@@ -609,7 +588,6 @@ class TelegramBot:
                 logger.error(f"Error ending break: {str(e)}")
                 return ConversationHandler.END
 
-class TelegramBot:
     async def start_creating_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Start question creation with subject selection."""
         query = update.callback_query
@@ -764,7 +742,6 @@ class TelegramBot:
         )
         return SETTING_CORRECT_ANSWER
 
-class TelegramBot:
     async def handle_correct_answer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle correct answer selection and proceed to explanation."""
         query = update.callback_query
@@ -947,7 +924,6 @@ class TelegramBot:
         except Exception as e:
             logger.error(f"Error handling answer attempt: {str(e)}")
 
-class TelegramBot:
     async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """End study session and show progress."""
         query = update.callback_query
@@ -1025,36 +1001,36 @@ class TelegramBot:
             logger.error(f"Error ending session: {str(e)}")
             return ConversationHandler.END
 
-async def generate_progress_image(
-    self, user_name: str, 
-    study_time: datetime.timedelta, 
-    break_time: datetime.timedelta
-) -> io.BytesIO:
-    """Generate a square progress image suitable for Instagram."""
-    # Create a square canvas (1080x1080 for Instagram)
-    width = height = 1080
-    image = Image.new('RGB', (width, height))
-    draw = ImageDraw.Draw(image)
+    async def generate_progress_image(
+        self, user_name: str, 
+        study_time: datetime.timedelta, 
+        break_time: datetime.timedelta
+    ) -> io.BytesIO:
+        """Generate a square progress image suitable for Instagram."""
+        # Create a square canvas (1080x1080 for Instagram)
+        width = height = 1080
+        image = Image.new('RGB', (width, height))
+        draw = ImageDraw.Draw(image)
 
-    try:
-        # Try to use Poppins fonts from the app directory
-        title_font = ImageFont.truetype("/app/fonts/Poppins-Bold.ttf", 60)
-        subtitle_font = ImageFont.truetype("/app/fonts/Poppins-SemiBold.ttf", 40)
-        body_font = ImageFont.truetype("/app/fonts/Poppins-Light.ttf", 32)
-    except Exception as e:
-        logger.warning(f"Error loading fonts from app directory: {e}")
         try:
-            # Try system fonts directory as fallback
-            title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 60)
-            subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf", 40)
-            body_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Light.ttf", 32)
+            # Try to use Poppins fonts from the app directory
+            title_font = ImageFont.truetype("/app/fonts/Poppins-Bold.ttf", 60)
+            subtitle_font = ImageFont.truetype("/app/fonts/Poppins-SemiBold.ttf", 40)
+            body_font = ImageFont.truetype("/app/fonts/Poppins-Light.ttf", 32)
         except Exception as e:
-            logger.error(f"Error loading system fonts: {e}")
-            # Final fallback to default font
-            title_font = ImageFont.load_default()
-            subtitle_font = title_font
-            body_font = title_font
-            
+            logger.warning(f"Error loading fonts from app directory: {e}")
+            try:
+                # Try system fonts directory as fallback
+                title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 60)
+                subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf", 40)
+                body_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Light.ttf", 32)
+            except Exception as e:
+                logger.error(f"Error loading system fonts: {e}")
+                # Final fallback to default font
+                title_font = ImageFont.load_default()
+                subtitle_font = title_font
+                body_font = title_font
+
         # Background colors (dark theme)
         background_color = "#1a1a1a"
         card_color = "#2d2d2d"
@@ -1191,10 +1167,11 @@ async def generate_progress_image(
             )
             return ConversationHandler.END
 
+
 def main():
     """Start the bot."""
     # Add startup logging
-    startup_time = "2025-06-05 18:29:42"  # Current UTC time
+    startup_time = "2025-06-06 07:49:26"  # Current UTC time
     current_user = "Zackrmt"
     
     logger.info(f"Bot starting at {startup_time} UTC")
@@ -1208,7 +1185,6 @@ def main():
         logger.info("Health check server started successfully")
     except Exception as e:
         logger.error(f"Error starting health check server: {str(e)}")
-        # Continue anyway as this is not critical
 
     # Create the Application and pass it your bot's token.
     application = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).build()
@@ -1312,6 +1288,7 @@ def main():
         )
     else:
         application.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 if __name__ == '__main__':
     main()
