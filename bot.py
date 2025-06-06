@@ -24,40 +24,13 @@ logging.basicConfig(
 
 # Add specific user and time information
 CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-06 15:09:17"  # Updated to current UTC time
+STARTUP_TIME = "2025-06-06 15:28:14"  # Updated to current UTC time
 
 # Set timezone configurations
 MANILA_TZ = pytz.timezone('Asia/Manila')
 PST_TZ = pytz.timezone('US/Pacific')
 
 logger = logging.getLogger(__name__)
-
-def load_fonts():
-    """Load fonts with proper fallback mechanism."""
-    try:
-        # Try system fonts (installed by render.yaml)
-        title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 60)
-        subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf", 40)
-        body_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Light.ttf", 32)
-        logger.info("Successfully loaded system fonts")
-        return title_font, subtitle_font, body_font
-    except Exception as e:
-        logger.warning(f"Error loading system fonts: {e}")
-        # Fallback to default font
-        default_font = ImageFont.load_default()
-        logger.info("Using default font as fallback")
-        return default_font, default_font, default_font
-
-# Load fonts at startup
-title_font, subtitle_font, body_font = load_fonts()
-
-# Signal handler for graceful shutdown
-def signal_handler(sig, frame):
-    logger.info("Received shutdown signal, cleaning up...")
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
 
 # States for conversation handler
 (CHOOSING_MAIN_MENU, SETTING_GOAL, CONFIRMING_GOAL, CHOOSING_SUBJECT,
@@ -88,6 +61,33 @@ SUBJECTS = {
     "General Books 📚": "General Books",
     "RECALLS 🤔💭": "RECALLS"
 }
+
+def load_fonts():
+    """Load fonts with proper fallback mechanism."""
+    try:
+        # Try system fonts (installed by render.yaml)
+        title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 60)
+        subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf", 40)
+        body_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Light.ttf", 32)
+        logger.info("Successfully loaded system fonts")
+        return title_font, subtitle_font, body_font
+    except Exception as e:
+        logger.warning(f"Error loading system fonts: {e}")
+        # Fallback to default font
+        default_font = ImageFont.load_default()
+        logger.info("Using default font as fallback")
+        return default_font, default_font, default_font
+
+# Load fonts at startup
+title_font, subtitle_font, body_font = load_fonts()
+
+# Signal handler for graceful shutdown
+def signal_handler(sig, frame):
+    logger.info("Received shutdown signal, cleaning up...")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 class StudySession:
     def __init__(self):
@@ -231,7 +231,7 @@ class TelegramBot:
         self.study_sessions: Dict[int, StudySession] = {}
         self.questions: Dict[int, Question] = {}
         self.current_questions: Dict[int, Question] = {}
-        self.startup_time = "2025-06-06 15:13:09"  # UTC
+        self.startup_time = "2025-06-06 15:31:11"  # UTC
         self.current_user = "Zackrmt"
         self._start = None
 
@@ -317,6 +317,17 @@ class TelegramBot:
                 update.callback_query.message.message_id
             )
 
+    async def delete_message_callback(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Callback for deleting messages after a delay."""
+        job = context.job
+        try:
+            await context.bot.delete_message(
+                chat_id=job.data['chat_id'],
+                message_id=job.data['message_id']
+            )
+        except Exception as e:
+            logger.debug(f"Error deleting message: {str(e)}")
+
     async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle cancellation of any ongoing operation."""
         query = update.callback_query
@@ -350,18 +361,6 @@ class TelegramBot:
         
         return CHOOSING_MAIN_MENU
 
-    async def delete_message_callback(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Callback for deleting messages after a delay."""
-        job = context.job
-        try:
-            await context.bot.delete_message(
-                chat_id=job.data['chat_id'],
-                message_id=job.data['message_id']
-            )
-        except Exception as e:
-            logger.debug(f"Error deleting message: {str(e)}")
-
-class TelegramBot:
     async def ask_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Start study session with goal setting."""
         query = update.callback_query
@@ -565,7 +564,6 @@ class TelegramBot:
                 logger.error(f"Error ending break: {str(e)}")
                 return ConversationHandler.END
 
-class TelegramBot:
     async def start_creating_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Start question creation with subject selection."""
         query = update.callback_query
@@ -728,7 +726,6 @@ class TelegramBot:
         )
         return SETTING_CORRECT_ANSWER
 
-class TelegramBot:
     async def handle_correct_answer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle correct answer selection and proceed to explanation."""
         query = update.callback_query
@@ -916,7 +913,6 @@ class TelegramBot:
         except Exception as e:
             logger.error(f"Error handling answer attempt: {str(e)}")
 
-class TelegramBot:
     async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """End study session and show progress."""
         query = update.callback_query
@@ -1101,7 +1097,6 @@ class TelegramBot:
 
         return img_byte_arr
 
-class TelegramBot:
     async def show_progress_image(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Show progress image with Manila time."""
         query = update.callback_query
@@ -1155,10 +1150,11 @@ class TelegramBot:
             )
             return ConversationHandler.END
 
+
 def main():
     """Start the bot."""
     # Add startup logging with current timestamp
-    startup_time = "2025-06-06 15:19:53"  # Current UTC time
+    startup_time = "2025-06-06 15:37:42"  # Current UTC time
     current_user = "Zackrmt"
     
     logger.info(f"Bot starting at {startup_time} UTC")
