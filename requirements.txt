@@ -1,15 +1,3 @@
-services:
-  - type: web
-    name: mtle-study-bot
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: cd src && python bot.py
-    plan: free
-    healthCheckPath: /health
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: CURRENT_TIME
-        value: "2025-06-06 16:31:08"
-      - key: CURRENT_USER
-        value: "Zackrmt"
+python-telegram-bot==20.7
+Pillow==10.2.0
+pytz==2024.1
