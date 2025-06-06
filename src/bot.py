@@ -694,12 +694,12 @@ class TelegramBot:
         draw = ImageDraw.Draw(image)
 
         try:
-            # Load custom fonts
-            title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 60)
-            subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf", 40)
-            body_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Light.ttf", 32)
+            # Try using Arial Black for titles and Arial for other text
+            title_font = ImageFont.truetype("/usr/share/fonts/truetype/msttcorefonts/ariblk.ttf", 60)
+            subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/msttcorefonts/arial.ttf.ttf", 40)
+            body_font = ImageFont.truetype("/usr/share/fonts/truetype/msttcorefonts/arial.ttf", 32)
         except Exception as e:
-            logger.warning(f"Error loading custom fonts: {e}")
+            logger.warning(f"Error loading Arial fonts: {e}")
             # Fallback to default font
             title_font = subtitle_font = body_font = ImageFont.load_default()
 
