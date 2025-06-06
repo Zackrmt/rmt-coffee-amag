@@ -958,6 +958,84 @@ class TelegramBot:
         
         return SETTING_EXPLANATION
 
+    async def handle_explanation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle explanation input or skip."""
+        user = update.effective_user
+        question = self.current_questions.get(user.id)
+        
+        if not question:
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Error: No question being created. Please start over.",
+                should_delete=True
+            )
+            return await self.start(update, context)
+
+        # Handle skip explanation
+        if isinstance(update, CallbackQuery):
+            await update.answer()
+            try:
+                await update.message.delete()
+            except Exception as e:
+                logger.error(f"Error deleting message: {e}")
+            question.explanation = None
+        else:
+            # Delete user's message
+            try:
+                await update.message.delete()
+            except Exception as e:
+                logger.error(f"Error deleting message: {e}")
+            question.explanation = update.message.text
+
+        # Store the question
+        question_id = len(self.questions)
+        self.questions[question_id] = question
+
+        # Create answer buttons
+        buttons = []
+        for i, choice in enumerate(question.choices):
+            buttons.append([InlineKeyboardButton(
+                f"{chr(65+i)}. {choice}", 
+                callback_data=f'answer_{question_id}_{i}'
+            )])
+        
+        reply_markup = InlineKeyboardMarkup(buttons)
+
+        # Send the final question
+        subject_code = context.user_data.get('current_subject', 'Unknown')
+        subject_name = next((name for name, code in SUBJECTS.items() if code == subject_code), subject_code)
+        
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            f"Question created for {subject_name}!\n\n{question.format_for_display()}",
+            reply_markup=reply_markup,
+            should_delete=False  # Keep the question message
+        )
+
+        # Clear current question
+        del self.current_questions[user.id]
+
+        # Return to main menu
+        buttons = [
+            [
+                InlineKeyboardButton("Start Studying 📚", callback_data='start_studying'),
+                InlineKeyboardButton("Create Question ❓", callback_data='create_question')
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(buttons)
+        
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            "What would you like to do next?",
+            reply_markup=reply_markup,
+            should_delete=True
+        )
+
+        return CHOOSING_MAIN_MENU
+    
     async def handle_answer_attempt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle answer attempts for created questions."""
         query = update.callback_query
