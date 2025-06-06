@@ -3,6 +3,8 @@ services:
     name: study-bot
     env: python
     buildCommand: |
+      apt-get update && apt-get install -y fontconfig wget build-essential
+      pip install --upgrade pip
       pip install -r requirements.txt
       mkdir -p /usr/share/fonts/truetype/poppins
       wget -O Poppins-Bold.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf
