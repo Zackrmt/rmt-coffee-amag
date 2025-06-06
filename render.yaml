@@ -1,17 +1,18 @@
 services:
   - type: web
-    name: study-bot
+    name: mtle-study-bot
     env: python
     buildCommand: |
       # Update and install system dependencies
-      apt-get update && apt-get install -y fontconfig wget build-essential
-      # Install fonts
+      apt-get update && apt-get install -y fontconfig wget unzip
+      # Create font directory
       mkdir -p /usr/share/fonts/truetype/poppins
-      wget -O Poppins-Bold.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf
-      wget -O Poppins-Light.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Light.ttf
-      wget -O Poppins-SemiBold.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-SemiBold.ttf
-      mv Poppins-*.ttf /usr/share/fonts/truetype/poppins/
+      # Download and install Poppins fonts
+      wget https://fonts.google.com/download?family=Poppins -O poppins.zip
+      unzip poppins.zip -d poppins
+      cp poppins/*.ttf /usr/share/fonts/truetype/poppins/
       fc-cache -f -v
+      rm -rf poppins poppins.zip
       # Install Python dependencies
       pip install --upgrade pip
       pip install -r requirements.txt
