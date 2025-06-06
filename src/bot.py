@@ -693,22 +693,27 @@ class TelegramBot:
         image = Image.new('RGB', (width, height), '#1a1a1a')
         draw = ImageDraw.Draw(image)
 
+        # Get the directory of the current file
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+
         try:
             # Load fonts from local directory
-            title_font = ImageFont.truetype("src/fonts/ARIBLK.TTF", 60)
-            subtitle_font = ImageFont.truetype("src/fonts/arial.ttf", 40)
-            body_font = ImageFont.truetype("src/fonts/arial.ttf"", 32)
+            title_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "ARIBLK.TTF"), 60)
+            subtitle_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "arial.ttf"), 40)
+            body_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "arial.ttf"), 32)
+            logger.info("Successfully loaded custom fonts")
         except Exception as e:
             logger.warning(f"Error loading custom fonts: {e}")
             # Fallback to default font
             title_font = subtitle_font = body_font = ImageFont.load_default()
+            logger.info("Using default font as fallback")
 
         # Draw header background
-        header_height = 150
+        header_height = 125
         draw.rectangle([20, 20, width-20, header_height], fill='#2d2d2d', outline='#404040')
 
         # Draw header text (ensuring it stays within bounds)
-        header_text = "Study Progress Dashboard - MTLE 2025"
+        header_text = "Study Progress Dashboard"
         text_width = draw.textlength(header_text, font=title_font)
         text_x = (width - text_width) / 2
         draw.text((text_x, 40), header_text, fill='white', font=title_font)
@@ -716,6 +721,12 @@ class TelegramBot:
         # Draw timestamp
         timestamp = f"Generated at: {datetime.datetime.now(MANILA_TZ).strftime('%Y-%m-%d %I:%M:%S %p')}"
         draw.text((40, 100), timestamp, fill='#888888', font=body_font)
+
+        # Draw creator text
+        creator_text = "Study bot created by Eli"
+        creator_text_width = draw.textlength(creator_text, font=body_font)
+        creator_x = width - creator_text_width - 40  # 40 pixels from right edge
+        draw.text((creator_x, 100), creator_text, fill='#888888', font=body_font)
 
         # Draw main content box
         content_top = header_height + 40
