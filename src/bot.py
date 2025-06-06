@@ -491,83 +491,107 @@ class TelegramBot:
                 goal_msg = f"\nGoal: {context.user_data['goal_time']}h"
 
         session_start_time = self.study_sessions[user.id].start_time.astimezone(MANILA_TZ)
-        message = (
-            f"📚 Study Session Started!\n"
-            f"Subject: {subject_name}\n"
-            f"Started at: {session_start_time.strftime('%I:%M %p')}"
-            f"{goal_msg}"
-        )
         
+        # Message 1 (Keep forever)
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            message,
-            reply_markup=reply_markup
+            f"📚 Study Session Started!\nSubject: {subject_name}",
+            should_delete=False
+        )
+        
+        # Message 2 (Delete after new session)
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            f"Started at: {session_start_time.strftime('%I:%M %p')}",
+            should_delete=True
+        )
+        
+        # Message 3 (Delete after new session)
+        if context.user_data.get('goal_time'):
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                f"Goal: {context.user_data['goal_time']}h",
+                should_delete=True
+            )
+
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            "Session Controls:",
+            reply_markup=reply_markup,
+            should_delete=True
         )
         
         return STUDYING
 
-    async def handle_break(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle break start/end."""
-        query = update.callback_query
-        await query.answer()
-        
-        # Delete the clicked button's message
-        try:
-            await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message: {e}")
+ async def handle_break(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle break start/end."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Delete the clicked button's message
+    try:
+        await query.message.delete()
+    except Exception as e:
+        logger.error(f"Error deleting message: {e}")
 
-        user = update.effective_user
-        session = self.study_sessions.get(user.id)
-        
-        if not session:
-            await self.send_bot_message(
-                context,
-                update.effective_chat.id,
-                "No active study session found. Start a new session?"
-            )
-            return await self.start(update, context)
+    user = update.effective_user
+    session = self.study_sessions.get(user.id)
+    
+    if not session:
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            "No active study session found. Start a new session?"
+        )
+        return await self.start(update, context)
 
-        if query.data == 'start_break':
-            session.start_break()
-            buttons = [
-                [
-                    InlineKeyboardButton("End Break ▶️", callback_data='end_break'),
-                    InlineKeyboardButton("End Session ⏹️", callback_data='end_session')
-                ],
-                [InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')]
-            ]
-            reply_markup = InlineKeyboardMarkup(buttons)
+    if query.data == 'start_break':
+        session.start_break()
+        buttons = [
+            [
+                InlineKeyboardButton("End Break ▶️", callback_data='end_break'),
+                InlineKeyboardButton("End Session ⏹️", callback_data='end_session')
+            ],
+            [InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')]
+        ]
+        reply_markup = InlineKeyboardMarkup(buttons)
+        
+        # Break start message (keep forever)
+        break_start_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            f"☕ Break started at {break_start_time.strftime('%I:%M %p')}",
+            reply_markup=reply_markup,
+            should_delete=False  # Keep break message forever
+        )
+        return ON_BREAK
             
-            break_start_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
-            await self.send_bot_message(
-                context,
-                update.effective_chat.id,
-                f"☕ Break started at {break_start_time.strftime('%I:%M %p')}",
-                reply_markup=reply_markup
-            )
-            return ON_BREAK
-            
-        elif query.data == 'end_break':
-            session.end_break()
-            buttons = [
-                [
-                    InlineKeyboardButton("Take a Break ☕", callback_data='start_break'),
-                    InlineKeyboardButton("End Session ⏹️", callback_data='end_session')
-                ],
-                [InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')]
-            ]
-            reply_markup = InlineKeyboardMarkup(buttons)
-            
-            break_end_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
-            await self.send_bot_message(
-                context,
-                update.effective_chat.id,
-                f"▶️ Break ended at {break_end_time.strftime('%I:%M %p')}\nBack to studying!",
-                reply_markup=reply_markup
-            )
-            return STUDYING
+    elif query.data == 'end_break':
+        session.end_break()
+        buttons = [
+            [
+                InlineKeyboardButton("Take a Break ☕", callback_data='start_break'),
+                InlineKeyboardButton("End Session ⏹️", callback_data='end_session')
+            ],
+            [InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')]
+        ]
+        reply_markup = InlineKeyboardMarkup(buttons)
+        
+        # Break end message (keep forever)
+        break_end_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            f"▶️ Break ended at {break_end_time.strftime('%I:%M %p')}\nBack to studying!",
+            reply_markup=reply_markup,
+            should_delete=False  # Keep break message forever
+        )
+        return STUDYING
 
     async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """End the study session and show summary."""
@@ -909,27 +933,29 @@ class TelegramBot:
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                "Error: No question being created. Please start over."
+                "Error: No question being created. Please start over.",
+                should_delete=True
             )
             return await self.start(update, context)
-
+    
         # Delete user's message
         try:
             await update.message.delete()
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
-
-        # Split choices by newline and take first 4
-        choices = update.message.text.strip().split('\n')[:4]
+    
+        # Split choices by newline and remove empty lines
+        choices = [choice.strip() for choice in update.message.text.strip().split('\n') if choice.strip()]
         
-        if len(choices) != 4:
+        if len(choices) < 2:  # Minimum 2 choices required
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                "Please provide exactly 4 choices, one per line:"
+                "Please provide at least 2 choices, one per line:",
+                should_delete=True
             )
             return SETTING_CHOICES
-            
+                
         question.choices = choices
         
         # Create buttons for choosing correct answer
@@ -943,15 +969,19 @@ class TelegramBot:
         buttons.append([InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')])
         reply_markup = InlineKeyboardMarkup(buttons)
         
+        # Delete previous messages
+        await self.cleanup_messages(update, context)
+        
         await self.send_bot_message(
             context,
             update.effective_chat.id,
             "Select the correct answer:",
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            should_delete=True
         )
         
         return SETTING_CORRECT_ANSWER
-
+    
     async def handle_correct_answer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle correct answer selection."""
         query = update.callback_query
