@@ -1221,7 +1221,7 @@ def main():
         entry_points=[CommandHandler('start', lambda u, c: bot.start(u, c))],
         states={
             CHOOSING_MAIN_MENU: [
-                CallbackQueryHandler(bot.handle_goal_selection, pattern='^start_studying$'),
+                CallbackQueryHandler(bot.ask_goal, pattern='^start_studying$'),
                 CallbackQueryHandler(bot.start_creating_question, pattern='^create_question$')
             ],
             SETTING_GOAL: [
