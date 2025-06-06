@@ -627,29 +627,19 @@ class TelegramBot:
         session.end()
         manila_times = session.get_formatted_manila_times()
         
-        # Generate progress image
         try:
-            img_bytes = await self.generate_progress_image(
-                user.first_name,
-                session.get_total_study_time(),
-                session.get_total_break_time(),
-                session.subject,
-                session.goal_time,
-                session.get_study_break_ratio()
-            )
-            
-            # Message 1: Summary with image (keep forever)
-            photo_message = await context.bot.send_photo(
-                chat_id=update.effective_chat.id,
-                photo=img_bytes,
-                caption=f"📚 Study Session Summary\nSubject: {session.subject}",
-                message_thread_id=context.user_data.get('thread_id')
+            # Message 1: Summary (keep forever)
+            summary_msg = await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                f"📚 Study Session Summary\nSubject: {session.subject}",
+                should_delete=False
             )
             
             # Store message ID as one to keep
             if 'messages_to_keep' not in context.user_data:
                 context.user_data['messages_to_keep'] = []
-            context.user_data['messages_to_keep'].append(photo_message.message_id)
+            context.user_data['messages_to_keep'].append(summary_msg)
 
             # Message 2: Total Study Time (keep forever)
             study_time = session.get_total_study_time()
@@ -962,7 +952,7 @@ class TelegramBot:
             should_delete=True
         )
         
-        return previous_state
+        return SETTING_EXPLANATION
         
     async def handle_explanation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle explanation input or skip."""
@@ -1167,116 +1157,6 @@ class TelegramBot:
             return await self.start(update, context)
         else:  # reject_cancel - return to previous state
             previous_state = context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
-
-    async def generate_progress_image(
-        self,
-        user_name: str,
-        study_time: datetime.timedelta,
-        break_time: datetime.timedelta,
-        subject: str = None,
-        goal_time: str = None,
-        study_break_ratio: str = None
-    ) -> bytes:
-        """Generate a progress image with dynamic values."""
-        # Create a new image with a dark background
-        width, height = 1080, 1080
-        image = Image.new('RGB', (width, height), '#1a1a1a')
-        draw = ImageDraw.Draw(image)
-
-        # Get the directory of the current file
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-
-        try:
-            # Load fonts
-            title_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "ARIBLK.TTF"), 70)
-            header_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "arial.ttf"), 36)
-            stats_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "arial.ttf"), 48)
-            name_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "ARIBLK.TTF"), 60)
-        except Exception as e:
-            logger.warning(f"Error loading custom fonts: {e}")
-            title_font = header_font = stats_font = name_font = ImageFont.load_default()
-
-        # Draw top rounded rectangle
-        draw.rectangle([0, 0, width, 200], fill='#2d2d2d', outline='#2d2d2d')
-
-        # Draw title
-        title_text = "Study Progress Dashboard - MTLE 2025"
-        text_width = draw.textlength(title_text, font=title_font)
-        text_x = (width - text_width) / 2
-        draw.text((text_x, 30), title_text, fill='white', font=title_font)
-
-        # Draw timestamp (in Manila time) and creator
-        manila_time = datetime.datetime.now(MANILA_TZ)
-        timestamp = f"Generated at: {manila_time.strftime('%Y-%m-%d %I:%M:%S %p')} Manila Time"
-        draw.text((40, 120), timestamp, fill='#888888', font=header_font)
-        creator_text = "Study bot created by Eli"
-        draw.text((40, 160), creator_text, fill='#888888', font=header_font)
-
-        # Draw middle rounded rectangle
-        draw.rectangle([40, 250, width-40, 650], fill='#2d2d2d', outline='#404040')
-
-        # Draw subject if provided
-        if subject:
-            draw.text((60, 280), f"Subject: {subject}", fill='#cccccc', font=stats_font)
-
-        # Calculate and draw progress bar
-        bar_y = 350
-        bar_height = 40
-        bar_width = width - 120
-
-        # Calculate progress based on goal and study time
-        if goal_time and ':' in goal_time:
-            goal_hours, goal_minutes = map(int, goal_time.split(':'))
-            goal_total = goal_hours * 60 + goal_minutes
-            study_total = int(study_time.total_seconds() / 60)
-            progress = min(study_total / goal_total if goal_total > 0 else 0, 1)
-        else:
-            progress = 0
-
-        # Background bar
-        draw.rectangle([60, bar_y, width-60, bar_y+bar_height], fill='#3d3d3d', outline='#404040')
-        
-        # Progress bar
-        if progress > 0:
-            progress_width = int(bar_width * progress)
-            draw.rectangle([60, bar_y, 60+progress_width, bar_y+bar_height], fill='#ff6b6b')
-        
-        # Percentage text
-        percentage = f"{int(progress * 100)}%"
-        draw.text((width-140, bar_y), percentage, fill='white', font=stats_font)
-
-        # Draw statistics with dynamic values
-        y_position = 420
-        study_hours = int(study_time.total_seconds() // 3600)
-        study_minutes = int((study_time.total_seconds() % 3600) // 60)
-        break_hours = int(break_time.total_seconds() // 3600)
-        break_minutes = int((break_time.total_seconds() % 3600) // 60)
-
-        stats_data = [
-            ("Set Goal:", f"{goal_time}h" if goal_time else "Not set"),
-            ("Total Study Time:", f"{study_hours}h {study_minutes}m"),
-            ("Break Time:", f"{break_hours}h {break_minutes}m"),
-            ("Study/Break Ratio:", study_break_ratio if study_break_ratio else "N/A")
-        ]
-
-        for label, value in stats_data:
-            draw.text((60, y_position), label, fill='#cccccc', font=stats_font)
-            value_width = draw.textlength(str(value), font=stats_font)
-            draw.text((width-60-value_width, y_position), str(value), fill='white', font=stats_font)
-            y_position += 50
-
-        # Draw bottom name box with user's name
-        draw.rectangle([0, height-150, width, height], fill='#2d2d2d', outline='#2d2d2d')
-        name_text = f"Name: {user_name}, RMT"
-        name_width = draw.textlength(name_text, font=name_font)
-        name_x = (width - name_width) / 2
-        draw.text((name_x, height-100), name_text, fill='white', font=name_font)
-
-        # Convert to bytes
-        img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format='PNG')
-        img_byte_arr.seek(0)
-        return img_byte_arr.getvalue()
 
 def main() -> None:
     """Start the bot."""
