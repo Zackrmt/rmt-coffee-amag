@@ -919,6 +919,9 @@ class TelegramBot:
         """Handle correct answer selection."""
         query = update.callback_query
         await query.answer()
+
+        # Store the current state before potentially canceling
+        context.user_data['previous_state'] = SETTING_EXPLANATION
         
         # Delete the clicked button's message
         try:
@@ -941,7 +944,7 @@ class TelegramBot:
         correct_index = int(query.data.split('_')[1])
         question.correct_answer = correct_index
 
-        # Add explanation options with new button layout
+        # If returning to explanation state, redisplay the explanation prompt
         buttons = [
             [
                 InlineKeyboardButton("Add Explanation ✍️", callback_data='add_explanation'),
@@ -959,7 +962,7 @@ class TelegramBot:
             should_delete=True
         )
         
-        return SETTING_EXPLANATION
+        return previous_state
         
     async def handle_explanation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle explanation input or skip."""
@@ -1162,9 +1165,8 @@ class TelegramBot:
                 
             await self.cleanup_messages(update, context)
             return await self.start(update, context)
-        else:  # reject_cancel
-            # Return to previous state
-            return context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
+        else:  # reject_cancel - return to previous state
+            previous_state = context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
 
     async def generate_progress_image(
         self,
