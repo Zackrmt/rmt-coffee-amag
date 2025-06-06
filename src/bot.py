@@ -941,9 +941,12 @@ class TelegramBot:
         correct_index = int(query.data.split('_')[1])
         question.correct_answer = correct_index
 
-        # Add explanation options
+        # Add explanation options with new button layout
         buttons = [
-            [InlineKeyboardButton("Skip Explanation ➡️", callback_data='skip_explanation')],
+            [
+                InlineKeyboardButton("Add Explanation ✍️", callback_data='add_explanation'),
+                InlineKeyboardButton("Skip ➡️", callback_data='skip_explanation')
+            ],
             [InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')]
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
@@ -957,7 +960,7 @@ class TelegramBot:
         )
         
         return SETTING_EXPLANATION
-
+        
     async def handle_explanation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle explanation input or skip."""
         user = update.effective_user
@@ -1172,7 +1175,7 @@ class TelegramBot:
         goal_time: str = None,
         study_break_ratio: str = None
     ) -> bytes:
-        """Generate a progress image with improved layout."""
+        """Generate a progress image with dynamic values."""
         # Create a new image with a dark background
         width, height = 1080, 1080
         image = Image.new('RGB', (width, height), '#1a1a1a')
@@ -1182,71 +1185,90 @@ class TelegramBot:
         current_dir = os.path.dirname(os.path.abspath(__file__))
 
         try:
-            # Load fonts from local directory
-            title_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "ARIBLK.TTF"), 60)
-            subtitle_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "arial.ttf"), 40)
-            body_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "arial.ttf"), 32)
-            logger.info("Successfully loaded custom fonts")
+            # Load fonts
+            title_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "ARIBLK.TTF"), 70)
+            header_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "arial.ttf"), 36)
+            stats_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "arial.ttf"), 48)
+            name_font = ImageFont.truetype(os.path.join(current_dir, "fonts", "ARIBLK.TTF"), 60)
         except Exception as e:
             logger.warning(f"Error loading custom fonts: {e}")
-            # Fallback to default font
-            title_font = subtitle_font = body_font = ImageFont.load_default()
-            logger.info("Using default font as fallback")
+            title_font = header_font = stats_font = name_font = ImageFont.load_default()
 
-        # Draw header background
-        header_height = 125
-        draw.rectangle([20, 20, width-20, header_height], fill='#2d2d2d', outline='#404040')
+        # Draw top rounded rectangle
+        draw.rectangle([0, 0, width, 200], fill='#2d2d2d', outline='#2d2d2d')
 
-        # Draw header text (ensuring it stays within bounds)
-        header_text = "Study Progress Dashboard"
-        text_width = draw.textlength(header_text, font=title_font)
+        # Draw title
+        title_text = "Study Progress Dashboard - MTLE 2025"
+        text_width = draw.textlength(title_text, font=title_font)
         text_x = (width - text_width) / 2
-        draw.text((text_x, 40), header_text, fill='white', font=title_font)
+        draw.text((text_x, 30), title_text, fill='white', font=title_font)
 
-        # Draw timestamp
-        timestamp = f"Generated at: {datetime.datetime.now(MANILA_TZ).strftime('%Y-%m-%d %I:%M:%S %p')}"
-        draw.text((40, 100), timestamp, fill='#888888', font=body_font)
+        # Draw timestamp (in Manila time) and creator
+        manila_time = datetime.datetime.now(MANILA_TZ)
+        timestamp = f"Generated at: {manila_time.strftime('%Y-%m-%d %I:%M:%S %p')} Manila Time"
+        draw.text((40, 120), timestamp, fill='#888888', font=header_font)
+        creator_text = "Study bot created by Eli"
+        draw.text((40, 160), creator_text, fill='#888888', font=header_font)
 
-        # Draw creator text
-        creator_text = f"Created by {user_name}"
-        creator_text_width = draw.textlength(creator_text, font=body_font)
-        creator_x = width - creator_text_width - 40  # 40 pixels from right edge
-        draw.text((creator_x, 100), creator_text, fill='#888888', font=body_font)
+        # Draw middle rounded rectangle
+        draw.rectangle([40, 250, width-40, 650], fill='#2d2d2d', outline='#404040')
 
-        # Draw main content box
-        content_top = header_height + 40
-        draw.rectangle([20, content_top, width-20, height-100], fill='#2d2d2d', outline='#404040')
+        # Draw subject if provided
+        if subject:
+            draw.text((60, 280), f"Subject: {subject}", fill='#cccccc', font=stats_font)
 
-        # Draw statistics in new layout
-        y_position = content_top + 40
+        # Calculate and draw progress bar
+        bar_y = 350
+        bar_height = 40
+        bar_width = width - 120
+
+        # Calculate progress based on goal and study time
+        if goal_time and ':' in goal_time:
+            goal_hours, goal_minutes = map(int, goal_time.split(':'))
+            goal_total = goal_hours * 60 + goal_minutes
+            study_total = int(study_time.total_seconds() / 60)
+            progress = min(study_total / goal_total if goal_total > 0 else 0, 1)
+        else:
+            progress = 0
+
+        # Background bar
+        draw.rectangle([60, bar_y, width-60, bar_y+bar_height], fill='#3d3d3d', outline='#404040')
+        
+        # Progress bar
+        if progress > 0:
+            progress_width = int(bar_width * progress)
+            draw.rectangle([60, bar_y, 60+progress_width, bar_y+bar_height], fill='#ff6b6b')
+        
+        # Percentage text
+        percentage = f"{int(progress * 100)}%"
+        draw.text((width-140, bar_y), percentage, fill='white', font=stats_font)
+
+        # Draw statistics with dynamic values
+        y_position = 420
+        study_hours = int(study_time.total_seconds() // 3600)
+        study_minutes = int((study_time.total_seconds() % 3600) // 60)
+        break_hours = int(break_time.total_seconds() // 3600)
+        break_minutes = int((break_time.total_seconds() % 3600) // 60)
+
         stats_data = [
-            ("📚 Subject", subject if subject else "Not specified"),
-            ("🎯 Goal", f"{goal_time}h" if goal_time else "No goal set"),
-            ("⏱️ Study Time", f"{int(study_time.total_seconds()//3600)}h {int((study_time.total_seconds()%3600)//60)}m"),
-            ("☕ Break Time", f"{int(break_time.total_seconds()//3600)}h {int((break_time.total_seconds()%3600)//60)}m"),
-            ("📊 Study/Break", study_break_ratio if study_break_ratio else "N/A")
+            ("Set Goal:", f"{goal_time}h" if goal_time else "Not set"),
+            ("Total Study Time:", f"{study_hours}h {study_minutes}m"),
+            ("Break Time:", f"{break_hours}h {break_minutes}m"),
+            ("Study/Break Ratio:", study_break_ratio if study_break_ratio else "N/A")
         ]
 
         for label, value in stats_data:
-            # Draw stat box
-            box_height = 80
-            draw.rectangle([40, y_position, width-40, y_position+box_height], 
-                         fill='#363636', outline='#404040')
-            
-            # Draw label and value
-            draw.text((60, y_position+20), f"{label}:", fill='#cccccc', font=subtitle_font)
-            value_width = draw.textlength(str(value), font=subtitle_font)
-            draw.text((width-60-value_width, y_position+20), str(value), 
-                     fill='white', font=subtitle_font)
-            
-            y_position += box_height + 20
+            draw.text((60, y_position), label, fill='#cccccc', font=stats_font)
+            value_width = draw.textlength(str(value), font=stats_font)
+            draw.text((width-60-value_width, y_position), str(value), fill='white', font=stats_font)
+            y_position += 50
 
-        # Draw footer
-        draw.rectangle([20, height-80, width-20, height-20], fill='#2d2d2d', outline='#404040')
-        footer_text = "RMT Study Bot"
-        text_width = draw.textlength(footer_text, font=subtitle_font)
-        text_x = (width - text_width) / 2
-        draw.text((text_x, height-65), footer_text, fill='white', font=subtitle_font)
+        # Draw bottom name box with user's name
+        draw.rectangle([0, height-150, width, height], fill='#2d2d2d', outline='#2d2d2d')
+        name_text = f"Name: {user_name}, RMT"
+        name_width = draw.textlength(name_text, font=name_font)
+        name_x = (width - name_width) / 2
+        draw.text((name_x, height-100), name_text, fill='white', font=name_font)
 
         # Convert to bytes
         img_byte_arr = io.BytesIO()
@@ -1334,9 +1356,9 @@ def main() -> None:
             ],
             SETTING_EXPLANATION: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_explanation),
-                CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$'),
-                CallbackQueryHandler(lambda u, c: bot.handle_explanation(u, c), pattern='^skip_explanation$')
-            ]
+                CallbackQueryHandler(bot.handle_explanation, pattern='^skip_explanation$'),
+                CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
+            ],
         },
         fallbacks=[
             CommandHandler('start', lambda u, c: bot.start(u, c)),
