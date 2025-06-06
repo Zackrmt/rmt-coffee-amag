@@ -4,8 +4,12 @@ services:
     env: python
     buildCommand: |
       pip install -r requirements.txt
-      mkdir -p /app/fonts
-      cp Poppins-*.ttf /app/fonts/
+      mkdir -p /usr/share/fonts/truetype/poppins
+      wget -O Poppins-Bold.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf
+      wget -O Poppins-Light.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Light.ttf
+      wget -O Poppins-SemiBold.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-SemiBold.ttf
+      mv Poppins-*.ttf /usr/share/fonts/truetype/poppins/
+      fc-cache -f -v
     startCommand: python bot.py
     healthCheckPath: /health
     envVars:
@@ -13,3 +17,5 @@ services:
         value: 3.11.11
       - key: PORT
         value: 10000
+      - key: HEALTH_CHECK_PORT
+        value: 10001
