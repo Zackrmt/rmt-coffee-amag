@@ -1,14 +1,23 @@
 services:
   - type: web
     name: study-bot
-    env: docker  # Changed to docker since you have a Dockerfile
-    region: singapore  # Added for better latency in Asia
-    plan: free
-    buildCommand: null  # Remove buildCommand since we're using Dockerfile
-    startCommand: null  # Remove startCommand since it's in Dockerfile
+    env: python
+    buildCommand: |
+      # Update and install system dependencies
+      apt-get update && apt-get install -y fontconfig wget build-essential
+      # Install fonts
+      mkdir -p /usr/share/fonts/truetype/poppins
+      wget -O Poppins-Bold.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf
+      wget -O Poppins-Light.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Light.ttf
+      wget -O Poppins-SemiBold.ttf https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-SemiBold.ttf
+      mv Poppins-*.ttf /usr/share/fonts/truetype/poppins/
+      fc-cache -f -v
+      # Install Python dependencies
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: python bot.py
     healthCheckPath: /health
-    healthCheckPort: 10001  # Explicitly set health check port
-    autoDeploy: true  # Added for automatic deployments
+    healthCheckPort: 10001
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.11
@@ -19,9 +28,4 @@ services:
       - key: HEALTH_CHECK_PORT
         value: 10001
       - key: TELEGRAM_TOKEN
-        sync: false  # This will be set manually in Render dashboard
-    scaling:
-      minInstances: 1
-      maxInstances: 1
-      targetMemoryPercent: 80
-      targetCPUPercent: 80
+        sync: false
