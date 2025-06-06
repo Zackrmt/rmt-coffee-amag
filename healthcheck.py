@@ -22,14 +22,29 @@ class HealthCheck(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
             self.wfile.write(b'Not Found')
+    
+    def log_message(self, format, *args):
+        # Suppress logging for health check requests
+        pass
 
-def run_health_server():
-    port = int(os.environ.get('PORT', 10000))
+def run_health_server(port=None):
+    if port is None:
+        port = int(os.environ.get('PORT', 10000))
     server_address = ('', port)
     httpd = HTTPServer(server_address, HealthCheck)
     logging.info(f'Starting health check server on port {port}')
     httpd.serve_forever()
 
-def start_health_server():
-    thread = threading.Thread(target=run_health_server, daemon=True)
+def start_health_server(port=None):
+    """Start the health check server on the specified port.
+    
+    Args:
+        port (int, optional): The port to run the health check server on.
+                            If not provided, uses PORT environment variable or defaults to 10000.
+    """
+    thread = threading.Thread(
+        target=run_health_server,
+        args=(port,),
+        daemon=True
+    )
     thread.start()
