@@ -1,96 +1,83 @@
-import os
 import logging
-import datetime
-from datetime import timezone
-import asyncio
-import signal
-import sys
+import os
+from datetime import datetime, timezone, timedelta
 import pytz
+import io
+from PIL import Image, ImageDraw, ImageFont
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, MessageHandler,
-    ContextTypes, filters, ConversationHandler
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ConversationHandler,
+    ContextTypes,
+    filters
 )
-from PIL import Image, ImageDraw, ImageFont
-import io
-from typing import Dict, List, Optional
+from dotenv import load_dotenv
 from healthcheck import start_health_server
+
+# Load environment variables
+load_dotenv()
 
 # Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-
-# Update timestamps
-CURRENT_USER = "Zackrmt"
-STARTUP_TIME = "2025-06-06 09:36:29"
-
-# Set timezone configurations
-MANILA_TZ = pytz.timezone('Asia/Manila')
-PST_TZ = pytz.timezone('US/Pacific')
-
 logger = logging.getLogger(__name__)
 
-try:
-    # Try to use installed Poppins fonts
-    title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 80)
-    main_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Light.ttf", 60)
-except Exception as e:
-    logger.warning(f"Error loading Poppins fonts: {e}")
-    # Fallback to default system font if Poppins is not available
-    title_font = ImageFont.load_default()
-    main_font = ImageFont.load_default()
+# Conversation states
+CHOOSING_MAIN_MENU = 0
+SETTING_GOAL = 1
+SETTING_CUSTOM_GOAL = 2
+CHOOSING_SUBJECT = 3
+STUDYING = 4
+ON_BREAK = 5
+CREATING_QUESTION = 6
+CONFIRMING_QUESTION = 7
+SETTING_CHOICES = 8
+SETTING_CORRECT_ANSWER = 9
+SETTING_EXPLANATION = 10
 
-# Signal handler for graceful shutdown
-def signal_handler(sig, frame):
-    logger.info("Received shutdown signal, cleaning up...")
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
-# States for conversation handler
-(CHOOSING_MAIN_MENU, SETTING_GOAL, SETTING_CUSTOM_GOAL, CONFIRMING_GOAL,
- CHOOSING_SUBJECT, STUDYING, ON_BREAK, CREATING_QUESTION, SETTING_CHOICES,
- CONFIRMING_QUESTION, SETTING_CORRECT_ANSWER, SETTING_EXPLANATION) = range(12)
-
-# Subject emojis and codes
+# Subject definitions with emojis
 SUBJECTS = {
-    "CC 🧪": "CC",
-    "BACTE 🦠": "BACTE",
-    "VIRO 👾": "VIRO",
-    "MYCO 🍄": "MYCO",
-    "PARA 🪱": "PARA",
-    "CM 🚽💩": "CM",
-    "HISTO 🧻🗳️": "HISTO",
-    "MT Laws ⚖️": "MT Laws",
-    "HEMA 🩸": "HEMA",
-    "IS ⚛": "IS",
-    "BB 🩹": "BB",
-    "MolBio 🧬": "MolBio",
-    "Autopsy ☠": "Autopsy",
-    "General Books 📚": "General Books",
-    "RECALLS 🤔💭": "RECALLS"
+    "Math": "📐",
+    "Science": "🔬",
+    "English": "📚",
+    "History": "📜",
+    "Geography": "🌍",
+    "Computer": "💻",
+    "Physics": "⚡",
+    "Chemistry": "🧪",
+    "Biology": "🧬",
+    "Language": "🗣️",
+    "Economics": "📊",
+    "Business": "💼",
+    "Art": "🎨",
+    "Music": "🎵",
+    "Physical Ed": "⚽",
+    "Other": "📝"
 }
 
-# Subject-specific colors
+# Subject colors for progress image
 SUBJECT_COLORS = {
-    'CC': '#FF5733',
-    'BACTE': '#33FF57',
-    'VIRO': '#3357FF',
-    'MYCO': '#8833FF',
-    'PARA': '#FF33E9',
-    'CM': '#FFB533',
-    'HISTO': '#33FFE9',
-    'MT Laws': '#A5FF33',
-    'HEMA': '#FF3333',
-    'IS': '#33A5FF',
-    'BB': '#FF33A5',
-    'MolBio': '#33FFA5',
-    'Autopsy': '#A533FF',
-    'General Books': '#FFD700',
-    'RECALLS': '#C0C0C0'
+    "Math": "#FF6B6B",
+    "Science": "#4ECDC4",
+    "English": "#45B7D1",
+    "History": "#96CEB4",
+    "Geography": "#FFEEAD",
+    "Computer": "#4D96FF",
+    "Physics": "#FFD93D",
+    "Chemistry": "#6C5CE7",
+    "Biology": "#A8E6CF",
+    "Language": "#FF8B94",
+    "Economics": "#98DDCA",
+    "Business": "#D4A5A5",
+    "Art": "#FFB6B9",
+    "Music": "#957DAD",
+    "Physical Ed": "#9ADCFF",
+    "Other": "#B5EAEA"
 }
 
 class StudySession:
@@ -99,243 +86,238 @@ class StudySession:
         self.end_time = None
         self.subject = None
         self.goal_time = None
-        self.breaks: List[Dict[str, datetime.datetime]] = []
+        self.breaks = []
         self.current_break = None
-        self.messages_to_delete = []
-        self.messages_to_keep = []
-        self.permanent_messages = []  # Track messages that should never be deleted
-        self.temp_messages = []      # Track messages that should be deleted on new session
+        self.permanent_messages = []
         self.thread_id = None
-        self.study_break_ratio = None  # Track study/break ratio
 
-    def start(self, subject: str, goal_time: Optional[str] = None):
-        """Start a new study session with PST time."""
-        self.start_time = datetime.datetime.now(PST_TZ)
+    def start(self, subject, goal_time=None):
+        """Start a new study session."""
+        self.start_time = datetime.now(timezone.utc)
         self.subject = subject
         self.goal_time = goal_time
+        self.breaks = []
+        self.current_break = None
+        self.permanent_messages = []
+
+    def end(self):
+        """End the current study session."""
+        self.end_time = datetime.now(timezone.utc)
 
     def start_break(self):
-        """Start a break using PST time."""
-        self.current_break = {'start': datetime.datetime.now(PST_TZ)}
+        """Start a break."""
+        self.current_break = {
+            'start': datetime.now(timezone.utc),
+            'end': None
+        }
 
     def end_break(self):
-        """End current break."""
+        """End the current break."""
         if self.current_break:
-            self.current_break['end'] = datetime.datetime.now(PST_TZ)
+            self.current_break['end'] = datetime.now(timezone.utc)
             self.breaks.append(self.current_break)
             self.current_break = None
 
-    def end(self):
-        """End the study session."""
-        self.end_time = datetime.datetime.now(PST_TZ)
-        # Calculate study/break ratio
-        study_time = self.get_total_study_time().total_seconds()
-        break_time = self.get_total_break_time().total_seconds()
-        if break_time > 0:
-            self.study_break_ratio = round(study_time / break_time, 1)
-        else:
-            self.study_break_ratio = float('inf')
-
-    def get_total_study_time(self) -> datetime.timedelta:
+    @property
+    def total_study_time(self):
         """Calculate total study time excluding breaks."""
-        if not self.start_time or not self.end_time:
-            return datetime.timedelta()
-        total_time = self.end_time - self.start_time
-        break_time = self.get_total_break_time()
-        return total_time - break_time
+        if not self.start_time:
+            return timedelta()
 
-    def get_total_break_time(self) -> datetime.timedelta:
+        end = self.end_time or datetime.now(timezone.utc)
+        total = end - self.start_time
+
+        # Subtract break times
+        break_time = self.total_break_time
+        return total - break_time
+
+    @property
+    def total_break_time(self):
         """Calculate total break time."""
-        total_break = datetime.timedelta()
-        for break_session in self.breaks:
-            total_break += break_session['end'] - break_session['start']
-        return total_break
-
-    def get_manila_time(self, dt: datetime.datetime) -> datetime.datetime:
-        """Convert PST time to Manila time."""
-        if dt is None:
-            return None
-        return dt.astimezone(MANILA_TZ)
-
-    def get_formatted_manila_times(self) -> dict:
-        """Get all times formatted in Manila timezone."""
-        times = {
-            'start': self.get_manila_time(self.start_time),
-            'end': self.get_manila_time(self.end_time),
-            'breaks': []
-        }
+        total = timedelta()
         
-        for break_session in self.breaks:
-            times['breaks'].append({
-                'start': self.get_manila_time(break_session['start']),
-                'end': self.get_manila_time(break_session['end'])
-            })
-        
-        return times
+        # Add completed breaks
+        for break_period in self.breaks:
+            total += break_period['end'] - break_period['start']
+
+        # Add current break if exists
+        if self.current_break:
+            current_end = datetime.now(timezone.utc)
+            total += current_end - self.current_break['start']
+
+        return total
+
+    @property
+    def study_break_ratio(self):
+        """Calculate the ratio of study time to break time."""
+        study_seconds = self.total_study_time.total_seconds()
+        break_seconds = self.total_break_time.total_seconds()
+
+        if break_seconds == 0:
+            return study_seconds if study_seconds > 0 else 0
+        return round(study_seconds / break_seconds, 2)
+
+    def get_manila_time(self, dt):
+        """Convert UTC time to Manila time."""
+        manila_tz = pytz.timezone('Asia/Manila')
+        return dt.astimezone(manila_tz)
 
 class Question:
-    def __init__(self, creator_id: int, creator_name: str):
-        self.creator_id = creator_id
-        self.creator_name = creator_name
+    def __init__(self, user_id, username):
+        self.user_id = user_id
+        self.username = username
         self.question_text = None
         self.choices = []
         self.correct_answer = None
         self.explanation = None
-        self.messages_to_delete = []
         self.thread_id = None
         self.user_messages = []
-        self.creation_time = datetime.datetime.now(PST_TZ)
 
-    def add_message_to_delete(self, message_id: int):
-        """Add a message ID to the list of messages to be deleted."""
-        if message_id not in self.messages_to_delete:
-            self.messages_to_delete.append(message_id)
+    def add_user_message(self, message_id):
+        """Add a message ID to be cleaned up later."""
+        self.user_messages.append(message_id)
 
-    def add_user_message(self, message_id: int):
-        """Add a user message ID for tracking."""
-        if message_id not in self.user_messages:
-            self.user_messages.append(message_id)
+    def format_for_display(self):
+        """Format the question for display."""
+        if not self.question_text or not self.choices:
+            return "Question not fully formed"
 
-    def get_manila_creation_time(self) -> datetime.datetime:
-        """Get the question creation time in Manila timezone."""
-        return self.creation_time.astimezone(MANILA_TZ)
-
-    def format_for_display(self) -> str:
-        """Format the question for display with proper Manila time."""
-        manila_time = self.get_manila_creation_time()
-        time_str = manila_time.strftime("%Y-%m-%d %I:%M %p")
-        
         choices_text = "\n".join(f"{chr(65+i)}. {choice}" 
                                for i, choice in enumerate(self.choices))
-        
-        return (
-            f"Question created on {time_str} (Manila Time)\n\n"
-            f"{self.question_text}\n\n"
-            f"{choices_text}\n\n"
-            f"Created by {self.creator_name}"
-        )
+        return f"{self.question_text}\n\n{choices_text}"
 
 class TelegramBot:
     def __init__(self):
-        self.study_sessions: Dict[int, StudySession] = {}
-        self.questions: Dict[int, Question] = {}
-        self.current_questions: Dict[int, Question] = {}
-        self.startup_time = "2025-06-06 09:39:20"  # Current timestamp
-        self.current_user = "Zackrmt"
-        self._start = None
+        """Initialize the bot with necessary containers."""
+        self.study_sessions = {}  # {user_id: StudySession}
+        self.current_questions = {}  # {user_id: Question}
+        self.questions = {}  # {message_id: Question}
+        self.permanent_messages = {}  # {user_id: [message_ids]}
 
-    async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Enhanced cleanup of messages."""
-        # Clean up temporary messages
-        if 'temp_messages' in context.user_data:
-            for msg_id in context.user_data['temp_messages']:
+    async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Clean up old messages to keep chat tidy."""
+        user_id = update.effective_user.id
+        
+        # Clean up permanent messages
+        if user_id in self.permanent_messages:
+            for msg_id in self.permanent_messages[user_id]:
                 try:
                     await context.bot.delete_message(
                         chat_id=update.effective_chat.id,
                         message_id=msg_id
                     )
                 except Exception as e:
-                    logger.debug(f"Error deleting temp message {msg_id}: {str(e)}")
-            context.user_data['temp_messages'] = []
+                    logger.error(f"Error deleting message: {str(e)}")
+            self.permanent_messages[user_id] = []
 
-        # Clean up button messages
-        if 'button_messages' in context.user_data:
-            for msg_id in context.user_data['button_messages']:
+        # Clean up question messages
+        question = self.current_questions.get(user_id)
+        if question:
+            for msg_id in question.user_messages:
                 try:
-                    await context.bot.edit_message_reply_markup(
+                    await context.bot.delete_message(
                         chat_id=update.effective_chat.id,
-                        message_id=msg_id,
-                        reply_markup=None
+                        message_id=msg_id
                     )
                 except Exception as e:
-                    logger.debug(f"Error removing buttons {msg_id}: {str(e)}")
-            context.user_data['button_messages'] = []
+                    logger.error(f"Error deleting question message: {str(e)}")
+            question.user_messages = []
 
-    async def send_bot_message(
-        self, context: ContextTypes.DEFAULT_TYPE, 
-        chat_id: int, text: str, 
-        reply_markup: InlineKeyboardMarkup = None,
-        should_delete: bool = True,
-        is_permanent: bool = False
-    ) -> int:
-        """Enhanced message sending with permanent message support."""
-        try:
-            message = await context.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                reply_markup=reply_markup,
-                message_thread_id=context.user_data.get('thread_id')
-            )
-            
-            if should_delete and not is_permanent:
-                if 'temp_messages' not in context.user_data:
-                    context.user_data['temp_messages'] = []
-                context.user_data['temp_messages'].append(message.message_id)
-            
-            if is_permanent:
-                if 'permanent_messages' not in context.user_data:
-                    context.user_data['permanent_messages'] = []
-                context.user_data['permanent_messages'].append(message.message_id)
-            
-            return message.message_id
-            
-        except Exception as e:
-            logger.error(f"Error sending message: {str(e)}")
-            return None
+    async def send_bot_message(self, context, chat_id, text, reply_markup=None):
+        """Send a message and store it for cleanup."""
+        message = await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            message_thread_id=context.user_data.get('thread_id')
+        )
+        
+        user_id = chat_id  # In private chats, chat_id is the same as user_id
+        if user_id not in self.permanent_messages:
+            self.permanent_messages[user_id] = []
+        self.permanent_messages[user_id].append(message.message_id)
+        
+        return message
 
-    @property
-    def start(self):
-        """Enhanced start method with improved message handling."""
-        if self._start is None:
-            async def _start_impl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-                # Clean up any existing state
-                await self.cleanup_messages(update, context)
-                
-                if update.effective_user.id in self.study_sessions:
-                    del self.study_sessions[update.effective_user.id]
-                
-                if update.message and update.message.message_thread_id:
-                    context.user_data['thread_id'] = update.message.message_thread_id
-                    logger.info(f"Starting bot in topic {update.message.message_thread_id}")
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Start the bot conversation."""
+        user = update.effective_user
+        
+        # Store the thread_id if message is in a forum topic
+        if update.message and update.message.is_topic_message:
+            context.user_data['thread_id'] = update.message.message_thread_id
 
-                keyboard = [
-                    [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
-                    [InlineKeyboardButton("Create Questions ❓", callback_data='create_question')]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                try:
-                    await self.send_bot_message(
-                        context,
-                        update.effective_chat.id,
-                        'Welcome to MTLE Study Bot! Choose an option:',
-                        reply_markup=reply_markup
-                    )
-                    return CHOOSING_MAIN_MENU
-                except Exception as e:
-                    logger.error(f"Error in start command: {str(e)}")
-                    return ConversationHandler.END
+        # Clean up any existing messages
+        await self.cleanup_messages(update, context)
 
-            self._start = _start_impl
-        return self._start
+        # Create keyboard for main menu
+        keyboard = [
+            [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
+            [InlineKeyboardButton("Create Questions ❓", callback_data='create_question')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-    async def ask_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Ask user to set a study goal."""
+        # Send welcome message
+        welcome_text = (
+            f"Hello {user.first_name}! 👋\n\n"
+            "I'm your study assistant bot. I can help you:\n"
+            "📚 Track your study sessions\n"
+            "⏰ Manage your breaks\n"
+            "❓ Create and practice with questions\n\n"
+            "What would you like to do?"
+        )
+
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            welcome_text,
+            reply_markup=reply_markup
+        )
+
+        return CHOOSING_MAIN_MENU
+
+    async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Cancel the current operation and return to main menu."""
+        query = update.callback_query
+        await query.answer()
+        await self.cleanup_messages(update, context)
+
+        user_id = update.effective_user.id
+        
+        # Clean up any active sessions or questions
+        if user_id in self.study_sessions:
+            del self.study_sessions[user_id]
+        if user_id in self.current_questions:
+            del self.current_questions[user_id]
+
+        keyboard = [
+            [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
+            [InlineKeyboardButton("Create Questions ❓", callback_data='create_question')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            "Operation cancelled. What would you like to do?",
+            reply_markup=reply_markup
+        )
+
+        return CHOOSING_MAIN_MENU
+
+    async def start_studying(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Start studying process by asking for goal."""
         query = update.callback_query
         await query.answer()
         await self.cleanup_messages(update, context)
 
         keyboard = [
-            [
-                InlineKeyboardButton("1 Hour", callback_data='goal_1'),
-                InlineKeyboardButton("2 Hours", callback_data='goal_2'),
-                InlineKeyboardButton("3 Hours", callback_data='goal_3')
-            ],
-            [
-                InlineKeyboardButton("4 Hours", callback_data='goal_4'),
-                InlineKeyboardButton("5 Hours", callback_data='goal_5'),
-                InlineKeyboardButton("6 Hours", callback_data='goal_6')
-            ],
+            [InlineKeyboardButton("30 minutes", callback_data='goal_1')],
+            [InlineKeyboardButton("1 hour", callback_data='goal_2')],
+            [InlineKeyboardButton("2 hours", callback_data='goal_3')],
+            [InlineKeyboardButton("3 hours", callback_data='goal_4')],
+            [InlineKeyboardButton("4 hours", callback_data='goal_5')],
+            [InlineKeyboardButton("5 hours", callback_data='goal_6')],
             [InlineKeyboardButton("Custom Goal ⚡", callback_data='goal_custom')],
             [InlineKeyboardButton("No Goal 🎯", callback_data='no_goal')],
             [InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')]
@@ -345,37 +327,64 @@ class TelegramBot:
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            'Set your study goal:',
+            "Let's set a study goal! How long do you plan to study?",
             reply_markup=reply_markup
         )
+
         return SETTING_GOAL
 
     async def handle_goal_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the selected study goal."""
+        """Handle the goal selection and move to subject selection."""
         query = update.callback_query
         await query.answer()
         await self.cleanup_messages(update, context)
 
-        choice = query.data
-        if choice == 'no_goal':
-            context.user_data['goal'] = None
-        else:
-            hours = choice.split('_')[1]
-            context.user_data['goal'] = hours
+        user = update.effective_user
+        goal_data = query.data
 
+        # Initialize study session
+        session = StudySession()
+        self.study_sessions[user.id] = session
+        session.thread_id = context.user_data.get('thread_id')
+
+        # Set goal time based on selection
+        if goal_data == 'no_goal':
+            goal_time = None
+        else:
+            goal_hours = {
+                'goal_1': 0.5,
+                'goal_2': 1,
+                'goal_3': 2,
+                'goal_4': 3,
+                'goal_5': 4,
+                'goal_6': 5
+            }.get(goal_data)
+            if goal_hours:
+                goal_time = timedelta(hours=goal_hours)
+            else:
+                return SETTING_CUSTOM_GOAL
+
+        # Create subject selection keyboard
         keyboard = [
-            [InlineKeyboardButton(f"{subject}", callback_data=f'subject_{code}')]
-            for subject, code in SUBJECTS.items()
+            [InlineKeyboardButton(f"{subject} {emoji}", callback_data=f'subject_{subject}')]
+            for subject, emoji in SUBJECTS.items()
         ]
         keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')])
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup([row for row in keyboard])
+
+        goal_text = (
+            "No specific goal set."
+            if goal_time is None
+            else f"Goal set: {goal_time.total_seconds()/3600:.1f} hours"
+        )
 
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            'Choose your subject:',
+            f"{goal_text}\nNow, choose your subject:",
             reply_markup=reply_markup
         )
+
         return CHOOSING_SUBJECT
 
     async def handle_custom_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -390,32 +399,42 @@ class TelegramBot:
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            'Enter your custom goal in hours (e.g., "2.5" for 2 hours and 30 minutes):',
+            "Enter your goal time in minutes:",
             reply_markup=reply_markup
         )
+
         return SETTING_CUSTOM_GOAL
 
     async def process_custom_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Process the custom goal input."""
+        """Process the custom goal time input."""
         try:
-            goal = float(update.message.text)
-            if goal <= 0:
-                raise ValueError("Goal must be positive")
-            context.user_data['goal'] = str(goal)
+            minutes = int(update.message.text)
+            if minutes <= 0:
+                raise ValueError("Time must be positive")
             
+            user = update.effective_user
+            session = StudySession()
+            self.study_sessions[user.id] = session
+            session.thread_id = context.user_data.get('thread_id')
+
+            # Create subject selection keyboard
             keyboard = [
-                [InlineKeyboardButton(f"{subject}", callback_data=f'subject_{code}')]
-                for subject, code in SUBJECTS.items()
+                [InlineKeyboardButton(f"{subject} {emoji}", callback_data=f'subject_{subject}')]
+                for subject, emoji in SUBJECTS.items()
             ]
             keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')])
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            reply_markup = InlineKeyboardMarkup([row for row in keyboard])
 
+            await self.cleanup_messages(update, context)
+            
+            goal_hours = minutes / 60
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                'Choose your subject:',
+                f"Goal set: {goal_hours:.1f} hours\nNow, choose your subject:",
                 reply_markup=reply_markup
             )
+
             return CHOOSING_SUBJECT
 
         except ValueError:
@@ -425,173 +444,212 @@ class TelegramBot:
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                'Please enter a valid number of hours (e.g., "2.5"):',
+                "Please enter a valid number of minutes:",
                 reply_markup=reply_markup
             )
+
             return SETTING_CUSTOM_GOAL
 
-    async def start_studying(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Start a study session."""
+    async def handle_subject_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle subject selection and start the study session."""
         query = update.callback_query
         await query.answer()
         await self.cleanup_messages(update, context)
 
         user = update.effective_user
-        subject_code = query.data.replace('subject_', '')
+        subject = query.data.replace('subject_', '')
+        session = self.study_sessions.get(user.id)
 
-        # Initialize new study session
-        session = StudySession()
-        session.start(subject_code, context.user_data.get('goal'))
-        session.thread_id = context.user_data.get('thread_id')
-        self.study_sessions[user.id] = session
+        if not session:
+            return await self.cancel_operation(update, context)
 
-        # Create control buttons
+        # Start the session with selected subject
+        session.start(subject, session.goal_time)
+
         keyboard = [
-            [InlineKeyboardButton("Start Break ☕", callback_data='start_break')],
-            [InlineKeyboardButton("End Session 🔚", callback_data='end_session')]
+            [InlineKeyboardButton("Take Break ☕", callback_data='take_break')],
+            [InlineKeyboardButton("End Session 🏁", callback_data='end_session')],
+            [InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # Format and send start message
-        goal_text = f"\nGoal: {session.goal_time} hours" if session.goal_time else ""
-        message = await self.send_bot_message(
-            context,
-            update.effective_chat.id,
-            f"Started studying {subject_code}{goal_text}\n"
+        study_message = (
+            f"📚 Studying {subject} {SUBJECTS[subject]}\n"
             f"Started at: {session.get_manila_time(session.start_time).strftime('%I:%M %p')}\n"
-            f"Use the buttons below to manage your session.",
-            reply_markup=reply_markup,
-            is_permanent=True
         )
 
-        if message:
-            session.permanent_messages.append(message)
+        if session.goal_time:
+            study_message += f"Goal: {session.goal_time.total_seconds()/3600:.1f} hours"
+
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            study_message,
+            reply_markup=reply_markup
+        )
 
         return STUDYING
 
     async def handle_break(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle break start/end."""
+        """Handle break time during study session."""
         query = update.callback_query
         await query.answer()
         await self.cleanup_messages(update, context)
 
         user = update.effective_user
         session = self.study_sessions.get(user.id)
+
         if not session:
-            return ConversationHandler.END
+            return await self.cancel_operation(update, context)
 
-        if query.data == 'start_break':
-            session.start_break()
-            keyboard = [
-                [InlineKeyboardButton("End Break ⏹", callback_data='end_break')],
-                [InlineKeyboardButton("End Session 🔚", callback_data='end_session')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            break_start = session.get_manila_time(session.current_break['start'])
-            message = await self.send_bot_message(
-                context,
-                update.effective_chat.id,
-                f"Break started at: {break_start.strftime('%I:%M %p')}",
-                reply_markup=reply_markup,
-                is_permanent=True
-            )
-            
-            if message:
-                session.permanent_messages.append(message)
-            return ON_BREAK
-
-        elif query.data == 'end_break':
-            session.end_break()
-            keyboard = [
-                [InlineKeyboardButton("Start Break ☕", callback_data='start_break')],
-                [InlineKeyboardButton("End Session 🔚", callback_data='end_session')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            break_data = session.breaks[-1]
-            break_start = session.get_manila_time(break_data['start'])
-            break_end = session.get_manila_time(break_data['end'])
-            break_duration = break_data['end'] - break_data['start']
-            
-            message = await self.send_bot_message(
-                context,
-                update.effective_chat.id,
-                f"Break ended\n"
-                f"Duration: {int(break_duration.total_seconds() // 60)} minutes\n"
-                f"Started: {break_start.strftime('%I:%M %p')}\n"
-                f"Ended: {break_end.strftime('%I:%M %p')}",
-                reply_markup=reply_markup,
-                is_permanent=True
-            )
-            
-            if message:
-                session.permanent_messages.append(message)
-            return STUDYING
-
-    async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Cancel current operation and return to main menu."""
-        query = update.callback_query
-        if query:
-            await query.answer()
-        
-        await self.cleanup_messages(update, context)
-        
-        user = update.effective_user
-        if user.id in self.study_sessions:
-            del self.study_sessions[user.id]
-        if user.id in self.current_questions:
-            del self.current_questions[user.id]
+        session.start_break()
 
         keyboard = [
-            [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
-            [InlineKeyboardButton("Create Questions ❓", callback_data='create_question')]
+            [InlineKeyboardButton("Resume Studying 📚", callback_data='resume_studying')],
+            [InlineKeyboardButton("End Session 🏁", callback_data='end_session')],
+            [InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
+
+        break_message = (
+            f"☕ Break Time!\n"
+            f"Study time so far: {int(session.total_study_time.total_seconds() // 3600)}h "
+            f"{int((session.total_study_time.total_seconds() % 3600) // 60)}m\n"
+            f"Break started at: {session.get_manila_time(session.current_break['start']).strftime('%I:%M %p')}"
+        )
 
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            'Operation cancelled. What would you like to do?',
+            break_message,
             reply_markup=reply_markup
         )
-        
-        return CHOOSING_MAIN_MENU
 
-    async def start_creating_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        return ON_BREAK
+
+    async def resume_studying(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Resume studying after a break."""
+        query = update.callback_query
+        await query.answer()
+        await self.cleanup_messages(update, context)
+
+        user = update.effective_user
+        session = self.study_sessions.get(user.id)
+
+        if not session:
+            return await self.cancel_operation(update, context)
+
+        session.end_break()
+
+        keyboard = [
+            [InlineKeyboardButton("Take Break ☕", callback_data='take_break')],
+            [InlineKeyboardButton("End Session 🏁", callback_data='end_session')],
+            [InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        resume_message = (
+            f"📚 Resuming {session.subject} {SUBJECTS[session.subject]}\n"
+            f"Total study time: {int(session.total_study_time.total_seconds() // 3600)}h "
+            f"{int((session.total_study_time.total_seconds() % 3600) // 60)}m\n"
+            f"Total break time: {int(session.total_break_time.total_seconds() // 3600)}h "
+            f"{int((session.total_break_time.total_seconds() % 3600) // 60)}m"
+        )
+
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            resume_message,
+            reply_markup=reply_markup
+        )
+
+        return STUDYING
+
+    async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """End the current study session and display statistics."""
+        query = update.callback_query
+        await query.answer()
+        await self.cleanup_messages(update, context)
+
+        user = update.effective_user
+        session = self.study_sessions.get(user.id)
+        
+        if not session:
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "No active study session found."
+            )
+            return ConversationHandler.END
+
+        # End the session and get statistics
+        session.end()
+        study_time = session.total_study_time
+        break_time = session.total_break_time
+
+        try:
+            # Generate progress image
+            image_data = await self.generate_progress_image(
+                user.first_name,
+                study_time,
+                break_time,
+                session
+            )
+
+            # Send final statistics with image
+            await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=image_data,
+                caption=(
+                    f"Session ended!\n\n"
+                    f"Subject: {session.subject}\n"
+                    f"Total Study Time: {int(study_time.total_seconds() // 3600)}h "
+                    f"{int((study_time.total_seconds() % 3600) // 60)}m\n"
+                    f"Total Break Time: {int(break_time.total_seconds() // 3600)}h "
+                    f"{int((break_time.total_seconds() % 3600) // 60)}m\n"
+                    f"Study/Break Ratio: {session.study_break_ratio:.1f}:1"
+                ),
+                message_thread_id=context.user_data.get('thread_id')
+            )
+
+            # Clean up session
+            del self.study_sessions[user.id]
+
+            # Return to main menu
+            keyboard = [
+                [InlineKeyboardButton("Start New Session 📚", callback_data='start_studying')],
+                [InlineKeyboardButton("Create Questions ❓", callback_data='create_question')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "What would you like to do next?",
+                reply_markup=reply_markup
+            )
+
+            return CHOOSING_MAIN_MENU
+
+        except Exception as e:
+            logging.error(f"Error ending session: {str(e)}")
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "An error occurred while ending the session. Please try again."
+            )
+            return STUDYING
+
+    async def create_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Start the question creation process."""
         query = update.callback_query
         await query.answer()
         await self.cleanup_messages(update, context)
 
-        keyboard = [
-            [InlineKeyboardButton(f"{subject}", callback_data=f'qsubject_{code}')]
-            for subject, code in SUBJECTS.items()
-        ]
-        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await self.send_bot_message(
-            context,
-            update.effective_chat.id,
-            'Select the subject for your question:',
-            reply_markup=reply_markup
-        )
-        return CHOOSING_SUBJECT
-
-    async def handle_subject_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle subject selection for question creation."""
-        query = update.callback_query
-        await query.answer()
-        await self.cleanup_messages(update, context)
-
-        subject = query.data.replace('qsubject_', '')
-        context.user_data['subject'] = subject
-
         user = update.effective_user
-        question = Question(user.id, user.first_name)
-        question.thread_id = context.user_data.get('thread_id')
+        question = Question(user.id, user.username)
         self.current_questions[user.id] = question
+        question.thread_id = context.user_data.get('thread_id')
 
         keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -599,271 +657,105 @@ class TelegramBot:
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            'Enter your question text:',
+            "Please enter your question:",
             reply_markup=reply_markup
         )
+
         return CREATING_QUESTION
 
-    async def handle_question_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the question text input."""
+    async def process_question_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Process the question text and ask for choices."""
         user = update.effective_user
         question = self.current_questions.get(user.id)
+
         if not question:
-            return ConversationHandler.END
+            return await self.cancel_operation(update, context)
 
         question.question_text = update.message.text
         question.add_user_message(update.message.message_id)
 
-        keyboard = [
-            [InlineKeyboardButton("✅ Confirm", callback_data='confirm_question')],
-            [InlineKeyboardButton("🔄 Try Again", callback_data='retry_question')],
-            [InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await self.send_bot_message(
-            context,
-            update.effective_chat.id,
-            f"Review your question:\n\n{question.question_text}\n\nIs this correct?",
-            reply_markup=reply_markup
-        )
-        return CONFIRMING_QUESTION
-
-    async def handle_question_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle question confirmation."""
-        query = update.callback_query
-        await query.answer()
-        await self.cleanup_messages(update, context)
-
-        if query.data == 'retry_question':
-            keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            await self.send_bot_message(
-                context,
-                update.effective_chat.id,
-                'Enter your question text again:',
-                reply_markup=reply_markup
-            )
-            return CREATING_QUESTION
-
         keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
+        await self.cleanup_messages(update, context)
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            'Enter four choices for your question, one per line:',
+            "Enter your choices one by one. Send 'done' when finished:",
             reply_markup=reply_markup
         )
+
         return SETTING_CHOICES
 
-    async def generate_progress_image(
-        self,
-        user_name: str,
-        study_time: datetime.timedelta,
-        break_time: datetime.timedelta,
-        session: StudySession
-    ) -> io.BytesIO:
-        """Generate a progress image matching the HTML layout."""
-        # Create a square canvas (1080x1080)
-        width = height = 1080
-        image = Image.new('RGB', (width, height), "#1a1a1a")  # Dark background
-        draw = ImageDraw.Draw(image)
-
-        try:
-            # Load fonts (with fallbacks)
-            try:
-                title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 48)
-                header_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 40)
-                subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf", 28)
-                body_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Light.ttf", 24)
-            except Exception as e:
-                logger.error(f"Error loading fonts: {str(e)}")
-                title_font = ImageFont.load_default()
-                header_font = title_font
-                subtitle_font = title_font
-                body_font = title_font
-
-            # Draw header section (20px padding)
-            header_height = 120
-            draw.rectangle(
-                [20, 20, width-20, header_height],
-                fill="#2d2d2d",
-                outline="#404040",
-                width=1
-            )
-
-            # Draw title
-            title_text = "Study Progress Dashboard"
-            draw.text(
-                (40, 35),
-                title_text,
-                font=title_font,
-                fill="#ffffff"
-            )
-
-            # Draw timestamp
-            current_time = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            draw.text(
-                (40, 85),
-                f"Generated at: {current_time}",
-                font=body_font,
-                fill="#888888"
-            )
-
-            # Draw main content card (subject info)
-            card_y = header_height + 40
-            card_height = 400
-            draw.rectangle(
-                [20, card_y, width-20, card_y + card_height],
-                fill="#2d2d2d",
-                outline="#404040",
-                width=1
-            )
-
-            # Draw subject title with emoji
-            subject_color = SUBJECT_COLORS.get(session.subject, "#ffffff")
-            draw.text(
-                (40, card_y + 20),
-                f"{session.subject} {SUBJECTS.get(session.subject, '')}",
-                font=header_font,
-                fill=subject_color
-            )
-
-            # Draw progress bar
-            progress_y = card_y + 80
-            progress_height = 20
-            progress_width = width - 80
-            
-            # Calculate progress if goal is set
-            if session.goal_time:
-                goal_hours = float(session.goal_time)
-                study_hours = study_time.total_seconds() / 3600
-                progress = min(study_hours / goal_hours * 100, 100)
-            else:
-                progress = 100  # Full bar if no goal set
-
-            # Draw progress bar background
-            draw.rectangle(
-                [40, progress_y, 40 + progress_width, progress_y + progress_height],
-                fill="#3d3d3d",
-                outline=None
-            )
-
-            # Draw progress bar fill
-            draw.rectangle(
-                [40, progress_y, 40 + (progress_width * progress / 100), progress_y + progress_height],
-                fill=subject_color,
-                outline=None
-            )
-
-            # Draw progress percentage
-            progress_text = f"{int(progress)}%"
-            draw.text(
-                (40 + progress_width - 50, progress_y + 2),
-                progress_text,
-                font=body_font,
-                fill="#ffffff"
-            )
-
-            # Draw statistics
-            stats_y = progress_y + 40
-            stats_data = [
-                ("Set Goal:", f"{session.goal_time} hours" if session.goal_time else "No goal set"),
-                ("Total Study Time:", f"{int(study_time.total_seconds() // 3600)}h {int((study_time.total_seconds() % 3600) // 60)}m"),
-                ("Break Time:", f"{int(break_time.total_seconds() // 3600)}h {int((break_time.total_seconds() % 3600) // 60)}m"),
-                ("Study/Break Ratio:", f"{session.study_break_ratio}:1" if session.study_break_ratio else "N/A")
-            ]
-
-            for label, value in stats_data:
-                draw.text((40, stats_y), label, font=subtitle_font, fill="#cccccc")
-                draw.text((width/2, stats_y), value, font=subtitle_font, fill="#ffffff")
-                stats_y += 40
-
-            # Draw footer
-            footer_y = height - 80
-            draw.rectangle(
-                [20, footer_y - 20, width-20, footer_y + 40],
-                fill="#2d2d2d",
-                outline="#404040",
-                width=1
-            )
-            draw.text(
-                (width/2, footer_y),
-                f"Name: {user_name}, RMT",
-                font=header_font,
-                fill="#ffffff",
-                anchor="mm"
-            )
-
-            # Save and return image
-            img_byte_arr = io.BytesIO()
-            image.save(img_byte_arr, format='PNG')
-            img_byte_arr.seek(0)
-            return img_byte_arr
-
-        except Exception as e:
-            logger.error(f"Error generating progress image: {str(e)}")
-            # Return a simple error image
-            draw.text((width/2, height/2), "Error generating image", font=body_font, fill="#ffffff", anchor="mm")
-            img_byte_arr = io.BytesIO()
-            image.save(img_byte_arr, format='PNG')
-            img_byte_arr.seek(0)
-            return img_byte_arr
-
-    async def handle_choices_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the choices input."""
+    async def process_choice(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Process each choice for the question."""
         user = update.effective_user
         question = self.current_questions.get(user.id)
-        if not question:
-            return ConversationHandler.END
 
-        choices = update.message.text.strip().split('\n')
+        if not question:
+            return await self.cancel_operation(update, context)
+
+        choice_text = update.message.text.strip()
         question.add_user_message(update.message.message_id)
 
-        if len(choices) != 4:
-            keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')]]
+        if choice_text.lower() == 'done':
+            if len(question.choices) < 2:
+                await self.send_bot_message(
+                    context,
+                    update.effective_chat.id,
+                    "Please provide at least 2 choices."
+                )
+                return SETTING_CHOICES
+
+            # Create keyboard for selecting correct answer
+            keyboard = [
+                [InlineKeyboardButton(
+                    f"{chr(65+i)}. {choice}", 
+                    callback_data=f'correct_{i}'
+                )]
+                for i, choice in enumerate(question.choices)
+            ]
+            keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')])
             reply_markup = InlineKeyboardMarkup(keyboard)
 
+            await self.cleanup_messages(update, context)
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                'Please enter exactly 4 choices, one per line:',
+                f"Your question:\n\n{question.format_for_display()}\n\nSelect the correct answer:",
                 reply_markup=reply_markup
             )
-            return SETTING_CHOICES
 
-        question.choices = choices
+            return SETTING_CORRECT_ANSWER
 
-        keyboard = [
-            [InlineKeyboardButton(f"{chr(65+i)}", callback_data=f'correct_{i}')]
-            for i in range(len(choices))
-        ]
-        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        choices_text = "\n".join(f"{chr(65+i)}. {choice}" for i, choice in enumerate(choices))
+        question.choices.append(choice_text)
+        
+        # Show current choices
+        choices_text = "\n".join(f"{chr(65+i)}. {choice}" 
+                               for i, choice in enumerate(question.choices))
+        
+        await self.cleanup_messages(update, context)
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            f"Select the correct answer:\n\n{choices_text}",
-            reply_markup=reply_markup
+            f"Current choices:\n{choices_text}\n\nEnter next choice or 'done' to finish:"
         )
-        return SETTING_CORRECT_ANSWER
 
-    async def handle_correct_answer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle correct answer selection."""
+        return SETTING_CHOICES
+
+    async def set_correct_answer(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Set the correct answer and ask for explanation."""
         query = update.callback_query
         await query.answer()
         await self.cleanup_messages(update, context)
 
         user = update.effective_user
         question = self.current_questions.get(user.id)
-        if not question:
-            return ConversationHandler.END
 
-        correct_index = int(query.data.split('_')[1])
+        if not question:
+            return await self.cancel_operation(update, context)
+
+        correct_index = int(query.data.replace('correct_', ''))
         question.correct_answer = correct_index
 
         keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data='cancel_operation')]]
@@ -872,106 +764,170 @@ class TelegramBot:
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            'Enter an explanation for the correct answer:',
+            "Please provide an explanation for the correct answer:",
             reply_markup=reply_markup
         )
+
         return SETTING_EXPLANATION
 
-    async def handle_explanation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle explanation input and save question."""
+    async def finalize_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Finalize the question creation process."""
         user = update.effective_user
         question = self.current_questions.get(user.id)
+
+        if not question:
+            return await self.cancel_operation(update, context)
+
         question.explanation = update.message.text
-        
-        # Store user's message for cleanup
         question.add_user_message(update.message.message_id)
 
-        try:
-            # Format the question for display
-            choices_text = "\n".join(f"{chr(65+i)}. {choice}" 
-                               for i, choice in enumerate(question.choices))
-        
-            # Create keyboard with answer choices
-            keyboard = [[InlineKeyboardButton(chr(65+i), callback_data=f'answer_{i}')] 
-                       for i in range(len(question.choices))]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-        
-            # Send the final question
-            message = await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=question.format_for_display(),
-                reply_markup=reply_markup,
-                message_thread_id=context.user_data.get('thread_id')
-            )
-        
-            # Store the question with the message ID as key
-            self.questions[message.message_id] = question
-        
-            # Clean up and return to main menu
-            del self.current_questions[user.id]
-        
-            keyboard = [
-                [InlineKeyboardButton("Create Another Question ❓", callback_data='create_question')],
-                [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-        
-            await self.send_bot_message(
-                context,
-                update.effective_chat.id,
-                "Question created successfully! What would you like to do next?",
-                reply_markup=reply_markup
-            )
-        
-            return CHOOSING_MAIN_MENU
-        
-        except Exception as e:
-            logger.error(f"Error saving question: {str(e)}")
-            return ConversationHandler.END
-
-    async def handle_answer_attempt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle answer attempts for questions."""
-        query = update.callback_query
-        await query.answer()
-
-        question = self.questions.get(query.message.message_id)
-        if not question:
-            return
-
-        answer_index = int(query.data.split('_')[1])
-        is_correct = answer_index == question.correct_answer
-
-        response_text = (
-            f"{'✅ Correct!' if is_correct else '❌ Incorrect!'}\n\n"
-            f"Explanation:\n{question.explanation}"
-        )
-
-        await context.bot.send_message(
+        # Store the question
+        message = await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=response_text,
+            text=(
+                f"Question by @{question.username}:\n\n"
+                f"{question.question_text}\n\n"
+                f"Choices:\n" +
+                "\n".join(f"{chr(65+i)}. {choice}" 
+                         for i, choice in enumerate(question.choices)) +
+                f"\n\nCorrect Answer: {chr(65+question.correct_answer)}\n\n"
+                f"Explanation:\n{question.explanation}"
+            ),
             message_thread_id=context.user_data.get('thread_id')
         )
 
-def main() -> None:
-    """Start the bot."""
-    # Create the Application and pass it your bot's token
-    application = Application.builder().token(os.environ["TELEGRAM_TOKEN"]).build()
+        self.questions[message.message_id] = question
+        del self.current_questions[user.id]
 
-    # Initialize bot instance
+        # Return to main menu
+        keyboard = [
+            [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
+            [InlineKeyboardButton("Create Another Question ❓", callback_data='create_question')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await self.cleanup_messages(update, context)
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            "Question created successfully! What would you like to do next?",
+            reply_markup=reply_markup
+        )
+
+        return CHOOSING_MAIN_MENU
+
+    async def generate_progress_image(self, username, study_time, break_time, session):
+        """Generate a progress image for the study session."""
+        try:
+            # Create a new image with a white background
+            width, height = 1200, 630
+            image = Image.new('RGB', (width, height), 'white')
+            draw = ImageDraw.Draw(image)
+
+            # Load fonts
+            try:
+                title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 48)
+                subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf", 36)
+                regular_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Light.ttf", 32)
+            except Exception as e:
+                logging.error(f"Error loading fonts: {str(e)}")
+                # Fallback to default font
+                title_font = ImageFont.load_default()
+                subtitle_font = ImageFont.load_default()
+                regular_font = ImageFont.load_default()
+
+            # Draw title
+            title_text = f"{username}'s Study Session"
+            title_bbox = draw.textbbox((0, 0), title_text, font=title_font)
+            title_width = title_bbox[2] - title_bbox[0]
+            draw.text(((width - title_width) // 2, 50), title_text, font=title_font, fill='black')
+
+            # Draw subject with emoji
+            subject_text = f"Subject: {session.subject} {SUBJECTS[session.subject]}"
+            subject_bbox = draw.textbbox((0, 0), subject_text, font=subtitle_font)
+            subject_width = subject_bbox[2] - subject_bbox[0]
+            draw.text(((width - subject_width) // 2, 150), subject_text, font=subtitle_font, fill='black')
+
+            # Draw time information
+            start_time = session.get_manila_time(session.start_time)
+            end_time = session.get_manila_time(session.end_time or datetime.now(timezone.utc))
+            
+            time_text = (
+                f"Started: {start_time.strftime('%I:%M %p')}\n"
+                f"Ended: {end_time.strftime('%I:%M %p')}\n"
+                f"Study Time: {int(study_time.total_seconds() // 3600)}h "
+                f"{int((study_time.total_seconds() % 3600) // 60)}m\n"
+                f"Break Time: {int(break_time.total_seconds() // 3600)}h "
+                f"{int((break_time.total_seconds() % 3600) // 60)}m"
+            )
+
+            # Draw colored box for statistics
+            stats_box_height = 200
+            stats_box_y = 250
+            box_color = SUBJECT_COLORS.get(session.subject, "#B5EAEA")
+            draw.rectangle(
+                [(100, stats_box_y), (width-100, stats_box_y+stats_box_height)],
+                fill=box_color
+            )
+
+            # Draw time information inside box
+            time_bbox = draw.textbbox((0, 0), time_text, font=regular_font)
+            time_height = time_bbox[3] - time_bbox[1]
+            draw.text(
+                (150, stats_box_y + (stats_box_height - time_height) // 2),
+                time_text,
+                font=regular_font,
+                fill='black'
+            )
+
+            # Draw footer
+            footer_text = "Generated by Study Session Bot 📚"
+            footer_bbox = draw.textbbox((0, 0), footer_text, font=regular_font)
+            footer_width = footer_bbox[2] - footer_bbox[0]
+            draw.text(
+                ((width - footer_width) // 2, height - 100),
+                footer_text,
+                font=regular_font,
+                fill='black'
+            )
+
+            # Save image to bytes
+            img_byte_arr = io.BytesIO()
+            image.save(img_byte_arr, format='PNG')
+            img_byte_arr.seek(0)
+
+            return img_byte_arr
+
+        except Exception as e:
+            logging.error(f"Error generating progress image: {str(e)}")
+            raise
+
+def main():
+    """Start the bot."""
+    # Start health check server
+    start_health_server(int(os.getenv('HEALTH_CHECK_PORT', 10001)))
+
+    # Create the Application and pass it your bot's token
+    application = Application.builder().token(os.getenv('TELEGRAM_TOKEN')).build()
+
+    # Create an instance of your bot
     bot = TelegramBot()
 
-    # Add conversation handler
+    # Create conversation handler
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', lambda u, c: bot.start(u, c))],
+        entry_points=[
+            CommandHandler('start', bot.start),
+            CallbackQueryHandler(bot.start_studying, pattern='^start_studying$'),
+            CallbackQueryHandler(bot.create_question, pattern='^create_question$')
+        ],
         states={
             CHOOSING_MAIN_MENU: [
-                CallbackQueryHandler(bot.ask_goal, pattern='^start_studying$'),
-                CallbackQueryHandler(bot.start_creating_question, pattern='^create_question$')
+                CallbackQueryHandler(bot.start_studying, pattern='^start_studying$'),
+                CallbackQueryHandler(bot.create_question, pattern='^create_question$')
             ],
             SETTING_GOAL: [
-                CallbackQueryHandler(bot.handle_goal_selection, pattern='^goal_[1-6]$'),
+                CallbackQueryHandler(bot.handle_goal_selection, pattern='^goal_'),
                 CallbackQueryHandler(bot.handle_custom_goal, pattern='^goal_custom$'),
-                CallbackQueryHandler(bot.handle_goal_selection, pattern='^no_goal$'),
                 CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
             ],
             SETTING_CUSTOM_GOAL: [
@@ -979,55 +935,41 @@ def main() -> None:
                 CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
             ],
             CHOOSING_SUBJECT: [
-                CallbackQueryHandler(bot.start_studying, pattern='^subject_'),
-                CallbackQueryHandler(bot.handle_subject_selection, pattern='^qsubject_'),
+                CallbackQueryHandler(bot.handle_subject_selection, pattern='^subject_'),
                 CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
             ],
             STUDYING: [
-                CallbackQueryHandler(bot.handle_break, pattern='^start_break$'),
+                CallbackQueryHandler(bot.handle_break, pattern='^take_break$'),
                 CallbackQueryHandler(bot.end_session, pattern='^end_session$'),
                 CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
             ],
             ON_BREAK: [
-                CallbackQueryHandler(bot.handle_break, pattern='^end_break$'),
+                CallbackQueryHandler(bot.resume_studying, pattern='^resume_studying$'),
                 CallbackQueryHandler(bot.end_session, pattern='^end_session$'),
                 CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
             ],
             CREATING_QUESTION: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_question_text),
-                CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
-            ],
-            CONFIRMING_QUESTION: [
-                CallbackQueryHandler(bot.handle_question_confirmation, pattern='^confirm_question$'),
-                CallbackQueryHandler(bot.handle_question_confirmation, pattern='^retry_question$'),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.process_question_text),
                 CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
             ],
             SETTING_CHOICES: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_choices_input),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.process_choice),
                 CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
             ],
             SETTING_CORRECT_ANSWER: [
-                CallbackQueryHandler(bot.handle_correct_answer, pattern='^correct_'),
+                CallbackQueryHandler(bot.set_correct_answer, pattern='^correct_'),
                 CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
             ],
             SETTING_EXPLANATION: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_explanation),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.finalize_question),
                 CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
             ]
         },
-        fallbacks=[
-            CommandHandler('start', lambda u, c: bot.start(u, c)),
-            CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$'),
-            CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_')
-        ],
-        per_message=False,
-        per_chat=True
+        fallbacks=[CommandHandler('cancel', bot.cancel_operation)]
     )
 
+    # Add handlers
     application.add_handler(conv_handler)
-
-    # Start health check server
-    start_health_server()
 
     # Start the Bot
     application.run_polling()
