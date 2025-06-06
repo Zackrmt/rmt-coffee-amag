@@ -66,9 +66,32 @@ def load_fonts():
     """Load fonts with proper fallback mechanism."""
     try:
         # Try system fonts (installed by render.yaml)
-        title_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf", 60)
-        subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf", 40)
-        body_font = ImageFont.truetype("/usr/share/fonts/truetype/poppins/Poppins-Light.ttf", 32)
+        font_paths = [
+            "/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf",
+            "/usr/share/fonts/truetype/poppins/Poppins-SemiBold.ttf",
+            "/usr/share/fonts/truetype/poppins/Poppins-Light.ttf"
+        ]
+        
+        # Try alternative paths if main paths fail
+        alt_paths = [
+            "./fonts/Poppins-Bold.ttf",
+            "./fonts/Poppins-SemiBold.ttf",
+            "./fonts/Poppins-Light.ttf"
+        ]
+        
+        for main_path, alt_path in zip(font_paths, alt_paths):
+            try:
+                font = ImageFont.truetype(main_path, 60)
+            except:
+                try:
+                    font = ImageFont.truetype(alt_path, 60)
+                except:
+                    raise
+        
+        title_font = ImageFont.truetype(font_paths[0], 60)
+        subtitle_font = ImageFont.truetype(font_paths[1], 40)
+        body_font = ImageFont.truetype(font_paths[2], 32)
+        
         logger.info("Successfully loaded system fonts")
         return title_font, subtitle_font, body_font
     except Exception as e:
@@ -1180,7 +1203,6 @@ def main():
     bot = TelegramBot()
     logger.info("Setting up conversation handlers...")
     
-    # Updated conversation handler with all features
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', lambda u, c: bot.start(u, c))],
         states={
@@ -1240,10 +1262,11 @@ def main():
             CallbackQueryHandler(bot.show_progress_image, pattern='^share_progress$'),
             CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_')
         ],
-        per_message=False,
-        per_chat=True
+        per_message=True,  # Changed to True to handle callbacks properly
+        per_chat=True,
+        name="main_conversation"  # Added name for better logging
     )
-
+    
     # Add handlers
     application.add_handler(conv_handler)
     application.add_handler(CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_'))
