@@ -44,23 +44,29 @@ MANILA_TZ = pytz.timezone('Asia/Manila')
     SETTING_CORRECT_ANSWER,
     SETTING_EXPLANATION,
     CHOOSING_DESIGN,
-    SETTING_CUSTOM_GOAL,  # New state for custom goal input
+    SETTING_CUSTOM_GOAL,
+    CONFIRMING_CANCEL,
 ) = range(12)
 
 # Subject mapping
 SUBJECTS = {
-    "Clinical Chemistry 🧪": "CC",
-    "Bacteriology 🦠": "BACTE",
-    "Virology 🧬": "VIRO",
-    "Parasitology 🦟": "PARA",
-    "Mycology 🍄": "MYCO",
-    "Immunology 🔬": "IMMUNO",
-    "Blood Banking 🏥": "BB",
-    "Hematology 🔴": "HEMA",
-    "Histopathology 🔍": "HISTO",
-    "Cytology 🧫": "CYTO",
-    "UA/BF/SF 💉": "UA",
-    "General Books 📚": "GB"
+    "CC 🧪": "CC",
+    "BACTE 🦠": "BACTE",
+    "VIRO 👾": "VIRO",
+    "MYCO 🍄": "MYCO",
+    "PARA 🪱": "PARA",
+    "CM 🚽💩": "CM",
+    "HISTO 🧻🗳️": "HISTO",
+    "MT Laws ⚖️": "MT_LAWS",
+    "HEMA 🩸": "HEMA",
+    "IS ⚛": "IS",
+    "BB 🩹": "BB",
+    "MolBio 🧬": "MOLBIO",
+    "Autopsy ☠": "AUTOPSY",
+    "General Books 📚": "GB",
+    "RECALLS 🤔💭": "RECALLS",
+    "ANKI 🎟️": "ANKI",
+    "Others": "OTHERS"
 }
 
 # Health Check Handler
@@ -298,9 +304,7 @@ class TelegramBot:
         reply_markup = InlineKeyboardMarkup(buttons)
         
         welcome_text = (
-            "Welcome to MTLE Study Bot! 📚✨\n\n"
-            "I'm here to help you track your study sessions and create review questions.\n\n"
-            "What would you like to do?"
+            "Main Menu Buttons 📚✨\n\n"
         )
         
         await self.send_bot_message(
@@ -313,8 +317,10 @@ class TelegramBot:
         
         return CHOOSING_MAIN_MENU
 
+    
     async def ask_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Ask user to set a study goal."""
+        context.user_data['previous_state'] = CHOOSING_MAIN_MENU
         query = update.callback_query
         await query.answer()
         await self.cleanup_messages(update, context)
@@ -411,6 +417,7 @@ class TelegramBot:
 
     async def show_subject_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Show subject selection buttons."""
+        context.user_data['previous_state'] = SETTING_GOAL
         # Create buttons for subjects in a grid
         buttons = []
         current_row = []
@@ -421,7 +428,7 @@ class TelegramBot:
                 callback_data=f'subject_{subject_code}'
             ))
             
-            if len(current_row) == 2:  # Two buttons per row
+            if len(current_row) == 4:  # Two buttons per row
                 buttons.append(current_row)
                 current_row = []
         
@@ -1036,17 +1043,41 @@ class TelegramBot:
         
         return CHOOSING_MAIN_MENU
 
-    async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Cancel the current operation and return to start."""
-        query = update.callback_query
-        if query:
-            await query.answer()
-            # Delete the clicked button's message
-            try:
-                await query.message.delete()
-            except Exception as e:
-                logger.error(f"Error deleting message: {e}")
+async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show cancel confirmation dialog."""
+    query = update.callback_query
+    if query:
+        await query.answer()
 
+    buttons = [
+        [
+            InlineKeyboardButton("Yes ✅", callback_data='confirm_cancel'),
+            InlineKeyboardButton("No ❌", callback_data='reject_cancel')
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
+    
+    await self.send_bot_message(
+        context,
+        update.effective_chat.id,
+        "Are you sure you want to cancel?",
+        reply_markup=reply_markup
+    )
+    
+    return CONFIRMING_CANCEL
+
+async def handle_cancel_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle the cancel confirmation response."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Delete the confirmation message
+    try:
+        await query.message.delete()
+    except Exception as e:
+        logger.error(f"Error deleting message: {e}")
+
+    if query.data == 'confirm_cancel':
         # Clean up any current operations
         user = update.effective_user
         if user.id in self.study_sessions:
@@ -1055,8 +1086,10 @@ class TelegramBot:
             del self.current_questions[user.id]
             
         await self.cleanup_messages(update, context)
-        
         return await self.start(update, context)
+    else:  # reject_cancel
+        # Return to previous state
+        return context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
 
     async def handle_answer_attempt(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle answer attempts for created questions."""
@@ -1132,6 +1165,10 @@ def main() -> None:
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', lambda u, c: bot.start(u, c))],
         states={
+            CONFIRMING_CANCEL: [
+            CallbackQueryHandler(bot.handle_cancel_confirmation, pattern='^confirm_cancel$'),
+            CallbackQueryHandler(bot.handle_cancel_confirmation, pattern='^reject_cancel$')
+        ],
             CHOOSING_MAIN_MENU: [
                 CallbackQueryHandler(bot.ask_goal, pattern='^start_studying$'),
                 CallbackQueryHandler(bot.start_creating_question, pattern='^create_question$')
