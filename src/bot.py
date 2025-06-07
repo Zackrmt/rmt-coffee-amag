@@ -579,7 +579,7 @@ class TelegramBot:
             )
             return STUDYING
 
-async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """End the study session and show summary."""
         query = update.callback_query
         await query.answer()
@@ -696,6 +696,7 @@ async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) 
         # Clear the session
         del self.study_sessions[user.id]
         return CHOOSING_MAIN_MENU
+
     async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Show cancel confirmation dialog."""
         query = update.callback_query
