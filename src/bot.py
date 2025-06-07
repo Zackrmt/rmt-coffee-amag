@@ -460,11 +460,12 @@ class TelegramBot:
         
         session_start_time = self.study_sessions[user.id].start_time.astimezone(MANILA_TZ)
         
-        # Message 1 (Keep forever)
+        # Message 1 (Keep forever) - Updated with username
+        user_name = user.first_name or user.username or "User"
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            "🚀 Study Session Started!",
+            f"🚀 {user_name} started a new session!",
             should_delete=False
         )
         
@@ -578,7 +579,7 @@ class TelegramBot:
             )
             return STUDYING
 
-    async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """End the study session and show summary."""
         query = update.callback_query
         await query.answer()
@@ -605,10 +606,11 @@ class TelegramBot:
         
         try:
             # Message 1: Summary (keep forever)
+            user_name = user.first_name or user.username or "User"
             summary_msg = await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                f"🚧 Study Session Ended 🚧",
+                f"🚧 {user_name} ended the session 🚧",
                 should_delete=False
             )
             
@@ -627,39 +629,50 @@ class TelegramBot:
             )
             context.user_data['messages_to_keep'].append(study_time_msg)
 
-            # Message 3: Session Times (delete on new session)
-            session_times_msg = await self.send_bot_message(
+            # Message 3: Session Times, Goal Progress, and Break Details (delete on new session)
+            session_info = [
+                f"Started: {manila_times['start'].strftime('%I:%M %p')}",
+                f"Ended: {manila_times['end'].strftime('%I:%M %p')}"
+            ]
+            
+            # Add goal progress if there's a goal
+            if context.user_data.get('goal_time'):
+                progress_percentage = session.get_progress_percentage()
+                session_info.append("")  # Add blank line
+                session_info.append(f"Goal Progress: {progress_percentage}%")
+            
+            if session.break_periods:
+                session_info.append("")  # Add blank line
+                session_info.append("Break Details:")
+                for break_period in manila_times['breaks']:
+                    session_info.append(
+                        f"Break: {break_period['start'].strftime('%I:%M %p')} - "
+                        f"{break_period['end'].strftime('%I:%M %p')}"
+                    )
+            
+            await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                f"Started: {manila_times['start'].strftime('%I:%M %p')}\n"
-                f"Ended: {manila_times['end'].strftime('%I:%M %p')}",
+                "\n".join(session_info),
                 should_delete=True
             )
 
-            # Message 4: Total Break Time (keep forever)
-            break_time = session.get_total_break_time()
-            break_time_msg = await self.send_bot_message(
+            # Message 4: Celebration (keep forever)
+            celebration_msg = await self.send_bot_message(
                 context,
                 update.effective_chat.id,
                 f"🎉",
                 should_delete=False
             )
-            context.user_data['messages_to_keep'].append(break_time_msg)
+            context.user_data['messages_to_keep'].append(celebration_msg)
 
-            # Message 5: Break Details (delete on new session)
-            if session.break_periods:
-                break_details = ["Break Details:"]
-                for break_period in manila_times['breaks']:
-                    break_details.append(
-                        f"Break: {break_period['start'].strftime('%I:%M %p')} - "
-                        f"{break_period['end'].strftime('%I:%M %p')}"
-                    )
-                await self.send_bot_message(
-                    context,
-                    update.effective_chat.id,
-                    "\n".join(break_details),
-                    should_delete=True
-                )
+            # Message 5: Motivational message (delete on new session)
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                f"**꧁RMT KA NA SA AUGUST꧂**",
+                should_delete=True
+            )
 
             # Create buttons for next action
             buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
@@ -683,7 +696,6 @@ class TelegramBot:
         # Clear the session
         del self.study_sessions[user.id]
         return CHOOSING_MAIN_MENU
-
     async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Show cancel confirmation dialog."""
         query = update.callback_query
