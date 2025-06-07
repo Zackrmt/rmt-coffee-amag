@@ -670,7 +670,7 @@ class TelegramBot:
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                f"**꧁RMT KA NA SA AUGUST꧂**",
+                f"꧁RMT KA NA SA AUGUST꧂",
                 should_delete=True
             )
 
