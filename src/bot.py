@@ -206,7 +206,30 @@ class StudySession:
 class TelegramBot:
     def __init__(self):
         self.study_sessions: Dict[int, StudySession] = {}
+
+    async def cleanup_all_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Clean up ALL messages including those marked to keep."""
+        # Get all messages to delete
+        messages_to_delete = context.user_data.get('messages_to_delete', [])
+        messages_to_keep = context.user_data.get('messages_to_keep', [])
         
+        # Combine all message IDs
+        all_messages = messages_to_delete + messages_to_keep
+        
+        # Delete each message
+        for message_id in all_messages:
+            try:
+                await context.bot.delete_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=message_id
+                )
+            except Exception as e:
+                logger.error(f"Error deleting message {message_id}: {e}")
+        
+        # Clear both lists
+        context.user_data['messages_to_delete'] = []
+        context.user_data['messages_to_keep'] = []
+    
     async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clean up messages that should be deleted."""
         # Get list of messages to delete from context
@@ -441,11 +464,18 @@ class TelegramBot:
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            f"⏳ Study Session Started!",
+            "🚀 Study Session Started!",
             should_delete=False
         )
-
+        
         # Message 2 (Keep forever)
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            f"Subject: {subject_name}",
+            should_delete=False
+        )
+        # Message 3 (Keep forever)
         await self.send_bot_message(
             context,
             update.effective_chat.id,
@@ -707,9 +737,11 @@ class TelegramBot:
             user = update.effective_user
             if user.id in self.study_sessions:
                 del self.study_sessions[user.id]
-                
-            await self.cleanup_messages(update, context)
+            
+            # Clean up ALL messages (including those marked to keep)
+            await self.cleanup_all_messages(update, context)
             return await self.start(update, context)
+            
         else:  # reject_cancel
             # Return to previous state
             return context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
