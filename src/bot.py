@@ -615,7 +615,7 @@ class TelegramBot:
             summary_msg = await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                f"⌛ Study Session Ended",
+                f"🚧 Study Session Ended 🚧",
                 should_delete=False
             )
             
