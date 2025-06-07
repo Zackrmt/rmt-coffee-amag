@@ -641,7 +641,7 @@ class TelegramBot:
             break_time_msg = await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                f"Total Break Time: {int(break_time.total_seconds() // 3600)}h {int((break_time.total_seconds() % 3600) // 60)}m",
+                f"🎉",
                 should_delete=False
             )
             context.user_data['messages_to_keep'].append(break_time_msg)
