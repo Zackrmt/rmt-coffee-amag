@@ -1295,7 +1295,16 @@ def main() -> None:
         logger.info("Bot is shutting down...")
         application.stop()
         application.shutdown()
-    
+
+    # Add persistence
+    persistence = PicklePersistence(filepath="bot_data.pickle")
+    application = (
+        Application.builder()
+        .token(os.getenv('TELEGRAM_BOT_TOKEN'))
+        .persistence(persistence)
+        .build()
+    )
+
     import atexit
     atexit.register(shutdown)
     
