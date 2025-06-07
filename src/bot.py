@@ -89,11 +89,26 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
 def start_health_server(port):
     """Start the health check server in a separate thread."""
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.daemon = True
-    thread.start()
-    logger.info("Health check server started on port %d", port)
+    try:
+        server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.daemon = True
+        thread.start()
+        logger.info("Health check server started on port %d", port)
+    except OSError as e:
+        logger.error(f"Failed to start health server on port {port}: {str(e)}")
+        # Try to start on a different port if the original is in use
+        try:
+            new_port = port + 1
+            server = HTTPServer(('0.0.0.0', new_port), HealthCheckHandler)
+            thread = threading.Thread(target=server.serve_forever)
+            thread.daemon = True
+            thread.start()
+            logger.info(f"Health check server started on alternate port {new_port}")
+        except Exception as e2:
+            logger.error(f"Failed to start health server on alternate port: {str(e2)}")
+    except Exception as e:
+        logger.error(f"Unexpected error starting health server: {str(e)}")
 
 class StudySession:
     def __init__(self, user_id: int, subject: str, goal_time: Optional[str] = None):
@@ -240,20 +255,36 @@ class TelegramBot:
         
     async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clean up messages that should be deleted."""
+        if not update or not update.effective_chat:
+            logger.warning("No update or chat available for cleanup")
+            return
+
         # Get list of messages to delete from context
         messages_to_delete = context.user_data.get('messages_to_delete', [])
         
+        if not messages_to_delete:
+            return
+            
         # Delete each message
         for message_id in messages_to_delete:
+            if not message_id:
+                continue
+                
             try:
                 await context.bot.delete_message(
                     chat_id=update.effective_chat.id,
                     message_id=message_id
                 )
+            except telegram.error.BadRequest as e:
+                if "Message to delete not found" in str(e):
+                    # Message already deleted, just log it
+                    logger.info(f"Message {message_id} already deleted")
+                else:
+                    logger.error(f"Error deleting message {message_id}: {str(e)}")
             except Exception as e:
-                logger.error(f"Error deleting message {message_id}: {e}")
+                logger.error(f"Unexpected error deleting message {message_id}: {str(e)}")
         
-        # Clear the list
+        # Clear the list after attempting all deletions
         context.user_data['messages_to_delete'] = []
 
     async def send_bot_message(
@@ -1171,6 +1202,9 @@ def main() -> None:
     # Create the Application and pass it your bot's token
     application = Application.builder().token(os.getenv('TELEGRAM_BOT_TOKEN')).build()
 
+    # Add error handler
+    application.add_error_handler(error_handler)
+    
     # Health check server setup
     try:
         port = int(os.getenv('HEALTH_CHECK_PORT', 10001))
@@ -1254,6 +1288,16 @@ def main() -> None:
 
     # Add handlers
     application.add_handler(conv_handler)
+
+    # Add shutdown handler
+    def shutdown():
+        """Cleanup on shutdown."""
+        logger.info("Bot is shutting down...")
+        application.stop()
+        application.shutdown()
+    
+    import atexit
+    atexit.register(shutdown)
     
     # Add separate handler for answer attempts
     answer_handler = CallbackQueryHandler(bot.handle_answer_attempt, pattern='^answer_')
