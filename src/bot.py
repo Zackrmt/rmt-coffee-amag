@@ -475,13 +475,6 @@ class TelegramBot:
             f"Subject: {subject_name}",
             should_delete=False
         )
-        # Message 3 (Keep forever)
-        await self.send_bot_message(
-            context,
-            update.effective_chat.id,
-            f"\nSubject: {subject_name}",
-            should_delete=False
-        )
         # Message 2 (Delete after new session)
         await self.send_bot_message(
             context,
