@@ -731,8 +731,8 @@ class TelegramBot:
             if user.id in self.study_sessions:
                 del self.study_sessions[user.id]
             
-            # Clean up ALL messages (including those marked to keep)
-            await self.cleanup_all_messages(update, context)
+            # Only clean up messages_to_delete, NOT messages_to_keep
+            await self.cleanup_messages(update, context)  # Changed from cleanup_all_messages
             return await self.start(update, context)
             
         else:  # reject_cancel
