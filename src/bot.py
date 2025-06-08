@@ -18,7 +18,10 @@ from telegram.ext import (
     CallbackQueryHandler,
     ConversationHandler,
     ContextTypes,
-    filters
+    filters,
+    ApplicationBuilder,
+    PersistenceInput,
+    PicklePersistence
 )
 
 # Configure logging
@@ -46,6 +49,9 @@ CURRENT_USER = "Zackrmt"
 
 # Process ID file for single instance check
 PID_FILE = "/tmp/rmt_study_bot.pid"
+
+# Persistence path
+PERSISTENCE_PATH = "/tmp/rmt_study_bot.pickle"
 
 # Shared state
 class SharedState:
@@ -188,6 +194,8 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
             status = "Running" if not shared_state.is_shutting_down else "Shutting Down"
             status_class = "good" if not shared_state.is_shutting_down else "warning"
             
+            current_utc_time = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            
             status_html = f"""
             <html>
                 <head>
@@ -256,16 +264,24 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
                             {resources['threads']}
                         </div>
                         <div class="metric">
-                            <span class="metric-name">Current Date and Time:</span> 
+                            <span class="metric-name">Current Date and Time (Manila):</span> 
                             {datetime.datetime.now(MANILA_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}
                         </div>
                         <div class="metric">
-                            <span class="metric-name">User:</span> 
+                            <span class="metric-name">Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS):</span> 
+                            {current_utc_time}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-name">Current User's Login:</span> 
                             {CURRENT_USER}
                         </div>
                         <div class="metric">
                             <span class="metric-name">Environment:</span> 
                             {'Production' if os.getenv('RENDER') else 'Development'}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-name">Data Persistence:</span> 
+                            {'Enabled' if os.path.exists(PERSISTENCE_PATH) else 'Not Enabled'}
                         </div>
                     </div>
                 </body>
@@ -543,7 +559,7 @@ class TelegramBot:
             if 'messages_to_delete' not in context.user_data:
                 context.user_data['messages_to_delete'] = []
             context.user_data['messages_to_delete'].append(message.message_id)
-        
+            
         return message.message_id
 
     def record_activity(self):
@@ -627,7 +643,7 @@ class TelegramBot:
             if user_id in self.pending_sessions and self.application:
                 pending_session = self.pending_sessions[user_id]
                 
-                # Delete all associated messages
+                # Silently delete all associated messages
                 for message_id in pending_session.message_ids:
                     try:
                         await self.application.bot.delete_message(
@@ -637,20 +653,9 @@ class TelegramBot:
                     except Exception as e:
                         logger.error(f"Error deleting pending session message {message_id}: {e}")
                 
-                # Notify the user
-                try:
-                    thread_id = pending_session.thread_id
-                    await self.application.bot.send_message(
-                        chat_id=pending_session.chat_id,
-                        text="Your study session setup was automatically cancelled due to inactivity (30 minutes timeout).",
-                        message_thread_id=thread_id
-                    )
-                except Exception as e:
-                    logger.error(f"Error sending cleanup notification: {e}")
-                
-                # Remove the pending session
+                # Remove the pending session silently - no notification sent
                 del self.pending_sessions[user_id]
-                logger.info(f"Cleaned up pending session for user {user_id} after timeout")
+                logger.info(f"Silently cleaned up pending session for user {user_id} after timeout")
         
         except Exception as e:
             logger.error(f"Error in pending session cleanup: {e}")
@@ -1107,7 +1112,7 @@ class TelegramBot:
             
             # Also remove from pending sessions
             if user.id in self.pending_sessions:
-                del self.pending_sessions[user_id]
+                del self.pending_sessions[user.id]
             
             await self.cleanup_messages(update, context)
             return await self.start(update, context)
@@ -1155,9 +1160,25 @@ async def run_bot_with_retries():
             if not token:
                 logger.error("No TELEGRAM_BOT_TOKEN provided in environment variables")
                 sys.exit(1)
+            
+            # Create persistence object to maintain conversation state across restarts
+            persistence = PicklePersistence(
+                filepath=PERSISTENCE_PATH,
+                store_data=PersistenceInput(
+                    chat_data=True,
+                    user_data=True,
+                    bot_data=True,
+                    callback_data=True,  # Important for buttons to work after restart
+                    conversation=True    # Keep conversation state
+                ),
+                update_interval=60,  # Save every 60 seconds
+            )
                 
             # Set up proper drop_pending_updates to avoid handling old messages
-            application = Application.builder().token(token).build()
+            application = ApplicationBuilder() \
+                .token(token) \
+                .persistence(persistence) \
+                .build()
             
             telegram_bot = TelegramBot()
             telegram_bot.application = application
@@ -1207,7 +1228,8 @@ async def run_bot_with_retries():
                 ],
                 per_message=False,
                 per_chat=True,
-                name="main_conversation"
+                name="main_conversation",
+                persistent=True  # Enable persistence for the conversation
             )
 
             application.add_handler(conv_handler)
@@ -1231,6 +1253,8 @@ async def run_bot_with_retries():
             )
             
             logger.info("Bot is now running and polling 24/7")
+            logger.info(f"Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"Current User's Login: {CURRENT_USER}")
 
             # Self-healing watchdog
             last_health_check = datetime.datetime.now()
@@ -1321,9 +1345,9 @@ def main():
             logger.error(f"Error in single instance check: {e}")
         
         # Add version and startup info
-        logger.info(f"Starting RMT Study Bot v1.0.5 - 24/7 Edition")
-        logger.info(f"Current Date and Time: {datetime.datetime.now(MANILA_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
-        logger.info(f"User: {CURRENT_USER}")
+        logger.info(f"Starting RMT Study Bot v1.1.0 - 24/7 Edition with Persistence")
+        logger.info(f"Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"Current User's Login: {CURRENT_USER}")
         logger.info(f"Process ID: {os.getpid()}")
         
         # Run the bot with retries
