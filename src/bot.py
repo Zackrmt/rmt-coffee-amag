@@ -94,7 +94,7 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         global telegram_bot
         
-        if self.path == '/health':
+        if self.path == '/health' or self.path == '/':  # Add root path for UptimeRobot
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
@@ -114,6 +114,7 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
             <html>
                 <head>
                     <title>RMT Study Bot Status</title>
+                    <meta http-equiv="refresh" content="60">
                     <style>
                         body {{ font-family: Arial, sans-serif; margin: 20px; }}
                         h1 {{ color: #2c3e50; }}
@@ -829,16 +830,33 @@ class TelegramBot:
         else:
             return context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
 
+# ================== ERROR HANDLER ==================
+async def error_handler(update, context):
+    """Handle errors in the telegram bot."""
+    logger.error(f"Exception while handling an update: {context.error}")
+    # Continue operation despite errors
+
+# ================== SELF-PING FUNCTION ==================
+def self_ping():
+    """Ping our own health endpoint to keep the service alive."""
+    try:
+        import urllib.request
+        port = int(os.getenv('PORT', 10001))
+        urllib.request.urlopen(f"http://localhost:{port}/health", timeout=10)
+    except Exception as e:
+        logger.warning(f"Self-ping failed: {e}")
+
 # ================== RELIABILITY IMPROVEMENTS ==================
 async def run_bot_with_retries():
     """Run the bot with automatic retries and permanent operation"""
     global telegram_bot
     
-    max_retries = 5
-    retry_delay = 10
+    max_retries = 10  # Increased from 5
+    retry_delay = 30  # Increased from 10
     
     for attempt in range(max_retries):
         try:
+            # Create persistent application
             application = Application.builder().token(os.getenv('TELEGRAM_BOT_TOKEN')).build()
             telegram_bot = TelegramBot()
             
@@ -889,38 +907,66 @@ async def run_bot_with_retries():
 
             application.add_handler(conv_handler)
             
+            # Add an error handler
+            application.add_error_handler(error_handler)
+            
             await application.initialize()
             await application.start()
             await application.updater.start_polling(
                 poll_interval=3,
-                timeout=20,
+                timeout=30,  # Increased timeout
                 drop_pending_updates=True
             )
             logger.info("Bot is now running and polling 24/7")
 
+            # Self-healing watchdog
+            last_health_check = datetime.datetime.now()
             while True:
-                inactive_time = (datetime.datetime.now() - telegram_bot.last_activity).total_seconds()
-                if inactive_time > 1800:
-                    logger.error(f"No activity for {inactive_time} seconds, restarting...")
-                    raise RuntimeError("Activity timeout")
+                current_time = datetime.datetime.now()
                 
-                if datetime.datetime.now().minute % 5 == 0:
+                # Check for inactivity and perform health check
+                inactive_time = (current_time - telegram_bot.last_activity).total_seconds()
+                health_check_due = (current_time - last_health_check).total_seconds() > 300  # Every 5 minutes
+                
+                if inactive_time > 3600:  # 1 hour inactivity threshold (increased)
+                    logger.warning(f"No activity for {inactive_time//60} minutes, performing health check...")
                     try:
                         await application.bot.get_me()
-                        logger.debug("Performed health check")
+                        logger.info("Health check passed despite inactivity")
+                        telegram_bot.last_activity = current_time  # Reset activity timer
                     except Exception as e:
-                        logger.error(f"Health check failed: {e}")
+                        logger.error(f"Health check failed after inactivity: {e}")
+                        raise RuntimeError("Activity timeout and health check failure")
                 
-                await asyncio.sleep(1)
+                # Periodic health check regardless of activity
+                if health_check_due:
+                    try:
+                        await application.bot.get_me()
+                        logger.debug("Periodic health check passed")
+                        last_health_check = current_time
+                    except Exception as e:
+                        logger.error(f"Periodic health check failed: {e}")
+                        raise RuntimeError("Health check failure")
+                
+                # Perform a self-ping to keep Render instance alive
+                if current_time.minute % 10 == 0 and current_time.second < 10:
+                    try:
+                        self_ping()
+                        logger.debug("Self-ping performed")
+                    except Exception as e:
+                        logger.warning(f"Self-ping failed: {e}")
+                
+                await asyncio.sleep(10)  # Check more frequently
             
         except Exception as e:
             logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
             if attempt < max_retries - 1:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 1.5, 300)  # Exponential backoff, max 5 minutes
             else:
-                logger.error("Max retries reached. Exiting.")
-                raise
+                logger.error("Max retries reached. Restarting process...")
+                os._exit(1)  # Force restart by exiting process
 
 # ================== MAIN ENTRY POINT ==================
 def main():
