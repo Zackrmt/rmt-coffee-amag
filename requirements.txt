@@ -5,3 +5,5 @@ psutil==5.9.5
 Flask==2.3.2
 gunicorn==20.1.0
 gevent==22.10.2
+requests==2.31.0  # Added for reliable HTTP requests
+urllib3==2.0.7    # Specified version for compatibility
