@@ -44,11 +44,17 @@ MANILA_TZ = pytz.timezone('Asia/Manila')
 CURRENT_DATE = "2025-06-08"
 CURRENT_USER = "Zackrmt"
 
-# Flag to track if the server is shutting down
-is_shutting_down = False
-
 # Process ID file for single instance check
 PID_FILE = "/tmp/rmt_study_bot.pid"
+
+# Shared state
+class SharedState:
+    def __init__(self):
+        self.is_shutting_down = False
+        self.telegram_bot = None
+
+# Create shared state object
+shared_state = SharedState()
 
 # Conversation states
 (
@@ -174,13 +180,13 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
             pending_sessions = 0
             last_activity_time = datetime.datetime.now()
             
-            if 'telegram_bot' in globals() and telegram_bot:
-                active_sessions = len(telegram_bot.study_sessions)
-                pending_sessions = len(telegram_bot.pending_sessions)
-                last_activity_time = telegram_bot.last_activity
+            if shared_state.telegram_bot:
+                active_sessions = len(shared_state.telegram_bot.study_sessions)
+                pending_sessions = len(shared_state.telegram_bot.pending_sessions)
+                last_activity_time = shared_state.telegram_bot.last_activity
             
-            status = "Running" if not is_shutting_down else "Shutting Down"
-            status_class = "good" if not is_shutting_down else "warning"
+            status = "Running" if not shared_state.is_shutting_down else "Shutting Down"
+            status_class = "good" if not shared_state.is_shutting_down else "warning"
             
             status_html = f"""
             <html>
@@ -274,8 +280,7 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
             self.wfile.write(b'Shutting down...')
             
             # Initiate shutdown
-            global is_shutting_down
-            is_shutting_down = True
+            shared_state.is_shutting_down = True
             threading.Thread(target=self.shutdown_application).start()
         else:
             self.send_response(404)
@@ -1102,7 +1107,7 @@ class TelegramBot:
             
             # Also remove from pending sessions
             if user.id in self.pending_sessions:
-                del self.pending_sessions[user.id]
+                del self.pending_sessions[user_id]
             
             await self.cleanup_messages(update, context)
             return await self.start(update, context)
@@ -1115,8 +1120,7 @@ async def error_handler(update, context):
     """Handle errors in the telegram bot."""
     if isinstance(context.error, telegram.error.Conflict):
         logger.error("Conflict error detected: Another instance is running. Shutting down this instance.")
-        global is_shutting_down
-        is_shutting_down = True
+        shared_state.is_shutting_down = True
         os._exit(1)  # Force exit to allow Render to restart a fresh instance
     else:
         logger.error(f"Exception while handling an update: {context.error}")
@@ -1134,8 +1138,6 @@ def self_ping():
 # ================== RELIABILITY IMPROVEMENTS ==================
 async def run_bot_with_retries():
     """Run the bot with automatic retries and permanent operation"""
-    global telegram_bot, is_shutting_down
-    
     keepalive_server = KeepaliveServer()
     keepalive_server.start()
     
@@ -1143,7 +1145,7 @@ async def run_bot_with_retries():
     retry_delay = 30
     
     for attempt in range(max_retries):
-        if is_shutting_down:
+        if shared_state.is_shutting_down:
             logger.info("Shutdown signal received. Exiting...")
             break
             
@@ -1159,6 +1161,9 @@ async def run_bot_with_retries():
             
             telegram_bot = TelegramBot()
             telegram_bot.application = application
+            
+            # Store in shared state
+            shared_state.telegram_bot = telegram_bot
             
             # Add start command handler
             application.add_handler(CommandHandler('start', telegram_bot.start))
@@ -1229,7 +1234,7 @@ async def run_bot_with_retries():
 
             # Self-healing watchdog
             last_health_check = datetime.datetime.now()
-            while not is_shutting_down:
+            while not shared_state.is_shutting_down:
                 current_time = datetime.datetime.now()
                 
                 # Check for inactivity and perform health check
@@ -1274,12 +1279,12 @@ async def run_bot_with_retries():
             
         except telegram.error.Conflict as e:
             logger.error(f"Conflict error: {e}. Another instance is likely running.")
-            is_shutting_down = True
+            shared_state.is_shutting_down = True
             break
             
         except Exception as e:
             logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
-            if attempt < max_retries - 1 and not is_shutting_down:
+            if attempt < max_retries - 1 and not shared_state.is_shutting_down:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 1.5, 300)  # Exponential backoff, max 5 minutes
@@ -1290,7 +1295,7 @@ async def run_bot_with_retries():
     # Stop the keepalive server
     keepalive_server.stop()
     
-    if is_shutting_down:
+    if shared_state.is_shutting_down:
         logger.info("Process is shutting down.")
     else:
         logger.error("Bot failed to start after maximum retries.")
@@ -1298,9 +1303,8 @@ async def run_bot_with_retries():
 # ================== SIGNAL HANDLERS ==================
 def handle_sigterm(signum, frame):
     """Handle SIGTERM gracefully."""
-    global is_shutting_down
     logger.info("Received SIGTERM signal. Initiating shutdown...")
-    is_shutting_down = True
+    shared_state.is_shutting_down = True
 
 # ================== MAIN ENTRY POINT ==================
 def main():
@@ -1317,7 +1321,7 @@ def main():
             logger.error(f"Error in single instance check: {e}")
         
         # Add version and startup info
-        logger.info(f"Starting RMT Study Bot v1.0.4 - 24/7 Edition")
+        logger.info(f"Starting RMT Study Bot v1.0.5 - 24/7 Edition")
         logger.info(f"Current Date and Time: {datetime.datetime.now(MANILA_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
         logger.info(f"User: {CURRENT_USER}")
         logger.info(f"Process ID: {os.getpid()}")
