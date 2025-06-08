@@ -6,6 +6,7 @@ import datetime
 import threading
 import time
 import signal
+import atexit
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Optional, Set
 import pytz
@@ -152,8 +153,6 @@ class ResourceMonitor:
 # ================== KEEPALIVE SERVER ==================
 class KeepaliveHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        global telegram_bot, is_shutting_down
-        
         if self.path == '/health' or self.path == '/':  # Add root path for UptimeRobot
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
@@ -1307,14 +1306,15 @@ def handle_sigterm(signum, frame):
 def main():
     """Main entry point with reliability enhancements"""
     try:
-        import atexit
-        
         # Register signal handlers
         signal.signal(signal.SIGTERM, handle_sigterm)
         signal.signal(signal.SIGINT, handle_sigterm)
         
-        # Ensure we're the only instance running
-        ensure_single_instance()
+        # Try to ensure we're the only instance running
+        try:
+            ensure_single_instance()
+        except Exception as e:
+            logger.error(f"Error in single instance check: {e}")
         
         # Add version and startup info
         logger.info(f"Starting RMT Study Bot v1.0.4 - 24/7 Edition")
