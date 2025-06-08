@@ -6,7 +6,7 @@ import datetime
 import threading
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 # Timezone configurations
 PST_TZ = pytz.timezone('America/Los_Angeles')
 MANILA_TZ = pytz.timezone('Asia/Manila')
+
+# Current date and user information
+CURRENT_DATE = "2025-06-08"
+CURRENT_USER = "Zackrmt"
 
 # Conversation states
 (
@@ -110,6 +114,8 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
             self.end_headers()
             resources = ResourceMonitor.get_status()
             active_sessions = len(telegram_bot.study_sessions) if 'telegram_bot' in globals() else 0
+            pending_sessions = len(telegram_bot.pending_sessions) if 'telegram_bot' in globals() else 0
+            
             status_html = f"""
             <html>
                 <head>
@@ -128,6 +134,9 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
                         .metric {{ margin-bottom: 10px; }}
                         .metric-name {{ font-weight: bold; }}
                         .session-list {{ margin-top: 20px; }}
+                        .good {{ color: green; }}
+                        .warning {{ color: orange; }}
+                        .bad {{ color: red; }}
                     </style>
                 </head>
                 <body>
@@ -135,12 +144,20 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
                     <div class="status-box">
                         <h2>System Health</h2>
                         <div class="metric">
+                            <span class="metric-name">Status:</span> 
+                            <span class="good">Running</span>
+                        </div>
+                        <div class="metric">
                             <span class="metric-name">Last Activity:</span> 
                             {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
                         </div>
                         <div class="metric">
                             <span class="metric-name">Active Sessions:</span> 
                             {active_sessions}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-name">Pending Sessions:</span> 
+                            {pending_sessions}
                         </div>
                         <div class="metric">
                             <span class="metric-name">CPU Usage:</span> 
@@ -168,7 +185,7 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
                         </div>
                         <div class="metric">
                             <span class="metric-name">User:</span> 
-                            Zackrmt
+                            {CURRENT_USER}
                         </div>
                     </div>
                 </body>
@@ -181,8 +198,34 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'Not Found')
 
+    # Override all methods to handle UptimeRobot requests
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        
+    def do_POST(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'OK')
+        
+    def do_PUT(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'OK')
+        
+    def do_DELETE(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'OK')
+
     def log_message(self, format, *args):
-        pass
+        if args[0].startswith(('GET /health', 'GET /ping', 'GET / HTTP')):
+            return  # Don't log health check requests
+        logger.info("%s - - [%s] %s" % (self.client_address[0], self.log_date_time_string(), format % args))
 
 def start_keepalive_server():
     """Start the health check server in a separate thread."""
@@ -307,11 +350,22 @@ class StudySession:
             
         return times
 
+# ================== PENDING SESSION CLASS ==================
+class PendingSession:
+    def __init__(self, user_id: int, chat_id: int, message_ids: list, start_time: datetime.datetime):
+        self.user_id = user_id
+        self.chat_id = chat_id
+        self.message_ids = message_ids
+        self.start_time = start_time
+        self.thread_id = None
+
 # ================== TELEGRAM BOT CLASS ==================
 class TelegramBot:
     def __init__(self):
         self.study_sessions: Dict[int, StudySession] = {}
+        self.pending_sessions: Dict[int, PendingSession] = {}
         self.last_activity = datetime.datetime.now()
+        self.start_command_handlers: Set[int] = set()  # Track users who have already triggered /start
 
     async def cleanup_all_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clean up ALL messages including those marked to keep."""
@@ -346,6 +400,11 @@ class TelegramBot:
                 logger.error(f"Error deleting message {message_id}: {e}")
         
         context.user_data['messages_to_delete'] = []
+        
+        # Also remove this user from pending sessions if they exist
+        user_id = update.effective_user.id
+        if user_id in self.pending_sessions:
+            del self.pending_sessions[user_id]
 
     async def send_bot_message(
         self, 
@@ -379,12 +438,26 @@ class TelegramBot:
         
         return message.message_id
 
-    async def record_activity(self):
+    def record_activity(self):
         """Update last activity timestamp"""
         self.last_activity = datetime.datetime.now()
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Start the conversation and ask if user wants to study."""
+        # Fix for duplicate welcome message
+        user_id = update.effective_user.id
+        
+        # Check if this user has already triggered the /start command
+        if user_id in self.start_command_handlers:
+            # If they have, just return without doing anything
+            return ConversationHandler.END
+        
+        # Add user to the set of users who have triggered /start
+        self.start_command_handlers.add(user_id)
+        
+        # Clear the set after a brief delay to allow future /start commands
+        asyncio.create_task(self.clear_start_handler(user_id, 5))  # 5 seconds delay
+        
         await self.cleanup_messages(update, context)
         self.record_activity()
         
@@ -412,7 +485,67 @@ class TelegramBot:
             context.user_data['messages_to_keep'] = []
         context.user_data['messages_to_keep'].append(message)
         
+        # Add this user to pending sessions
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        thread_id = update.message.message_thread_id if update.message.is_topic_message else None
+        
+        # Create a pending session
+        self.pending_sessions[user_id] = PendingSession(
+            user_id=user_id,
+            chat_id=chat_id,
+            message_ids=[message],
+            start_time=datetime.datetime.now()
+        )
+        self.pending_sessions[user_id].thread_id = thread_id
+        
+        # Schedule cleanup task for this pending session
+        asyncio.create_task(self.schedule_pending_session_cleanup(user_id))
+        
         return CHOOSING_MAIN_MENU
+
+    async def clear_start_handler(self, user_id: int, delay: int):
+        """Clear a user from the start handler set after a delay."""
+        await asyncio.sleep(delay)
+        if user_id in self.start_command_handlers:
+            self.start_command_handlers.remove(user_id)
+
+    async def schedule_pending_session_cleanup(self, user_id: int):
+        """Schedule cleanup of a pending session after 30 minutes."""
+        try:
+            await asyncio.sleep(30 * 60)  # 30 minutes
+            
+            # Check if this pending session still exists and hasn't been completed
+            if user_id in self.pending_sessions:
+                pending_session = self.pending_sessions[user_id]
+                
+                # Delete all associated messages
+                for message_id in pending_session.message_ids:
+                    try:
+                        await telegram_bot.application.bot.delete_message(
+                            chat_id=pending_session.chat_id,
+                            message_id=message_id
+                        )
+                    except Exception as e:
+                        logger.error(f"Error deleting pending session message {message_id}: {e}")
+                
+                # Notify the user
+                try:
+                    thread_id = pending_session.thread_id
+                    await telegram_bot.application.bot.send_message(
+                        chat_id=pending_session.chat_id,
+                        text="Your study session setup was automatically cancelled due to inactivity (30 minutes timeout).",
+                        message_thread_id=thread_id
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending cleanup notification: {e}")
+                
+                # Remove the pending session
+                del self.pending_sessions[user_id]
+                logger.info(f"Cleaned up pending session for user {user_id} after timeout")
+        
+        except Exception as e:
+            logger.error(f"Error in pending session cleanup: {e}")
 
     async def ask_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Ask user to set a study goal."""
@@ -443,12 +576,17 @@ class TelegramBot:
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
         
-        await self.send_bot_message(
+        message_id = await self.send_bot_message(
             context,
             update.effective_chat.id,
             "How long would you like to study? 🎯\nChoose a goal or set a custom duration (HH:MM):",
             reply_markup=reply_markup
         )
+        
+        # Update pending session for this user
+        user_id = update.effective_user.id
+        if user_id in self.pending_sessions:
+            self.pending_sessions[user_id].message_ids.append(message_id)
         
         try:
             await query.message.delete()
@@ -469,11 +607,17 @@ class TelegramBot:
             logger.error(f"Error deleting message: {e}")
 
         if query.data == 'goal_custom':
-            await self.send_bot_message(
+            message_id = await self.send_bot_message(
                 context,
                 update.effective_chat.id,
                 "Please enter your study goal in HH:MM format (e.g., 01:30 for 1 hour 30 minutes):"
             )
+            
+            # Update pending session for this user
+            user_id = update.effective_user.id
+            if user_id in self.pending_sessions:
+                self.pending_sessions[user_id].message_ids.append(message_id)
+                
             return SETTING_CUSTOM_GOAL
         
         goal_time = query.data.split('_')[1] if query.data != 'no_goal' else None
@@ -501,11 +645,17 @@ class TelegramBot:
             return await self.show_subject_selection(update, context)
             
         except ValueError:
-            await self.send_bot_message(
+            message_id = await self.send_bot_message(
                 context,
                 update.effective_chat.id,
                 "⚠️ Please enter a valid time in HH:MM format (e.g., 01:30 for 1 hour 30 minutes):"
             )
+            
+            # Update pending session for this user
+            user_id = update.effective_user.id
+            if user_id in self.pending_sessions:
+                self.pending_sessions[user_id].message_ids.append(message_id)
+                
             return SETTING_CUSTOM_GOAL
 
     async def show_subject_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -532,13 +682,18 @@ class TelegramBot:
         
         reply_markup = InlineKeyboardMarkup(buttons)
         
-        await self.send_bot_message(
+        message_id = await self.send_bot_message(
             context,
             update.effective_chat.id,
             "Choose your subject: 📚",
             reply_markup=reply_markup,
             should_delete=True
         )
+        
+        # Update pending session for this user
+        user_id = update.effective_user.id
+        if user_id in self.pending_sessions:
+            self.pending_sessions[user_id].message_ids.append(message_id)
         
         return CHOOSING_SUBJECT
 
@@ -611,6 +766,10 @@ class TelegramBot:
             reply_markup=reply_markup,
             should_delete=True
         )
+        
+        # Remove this user from pending sessions as they've completed setup
+        if user.id in self.pending_sessions:
+            del self.pending_sessions[user.id]
         
         return STUDYING
 
@@ -807,13 +966,18 @@ class TelegramBot:
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
         
-        await self.send_bot_message(
+        message_id = await self.send_bot_message(
             context,
             update.effective_chat.id,
             "Are you sure you want to cancel?",
             reply_markup=reply_markup,
             should_delete=True
         )
+        
+        # Update pending session for this user
+        user_id = update.effective_user.id
+        if user_id in self.pending_sessions:
+            self.pending_sessions[user_id].message_ids.append(message_id)
         
         return CONFIRMING_CANCEL
 
@@ -832,6 +996,10 @@ class TelegramBot:
             user = update.effective_user
             if user.id in self.study_sessions:
                 del self.study_sessions[user.id]
+            
+            # Also remove from pending sessions
+            if user.id in self.pending_sessions:
+                del self.pending_sessions[user.id]
             
             await self.cleanup_messages(update, context)
             return await self.start(update, context)
@@ -868,6 +1036,7 @@ async def run_bot_with_retries():
             # Create persistent application
             application = Application.builder().token(os.getenv('TELEGRAM_BOT_TOKEN')).build()
             telegram_bot = TelegramBot()
+            telegram_bot.application = application  # Store application reference for cleanup tasks
             
             # Add start command handler separately to avoid duplicate messages
             application.add_handler(CommandHandler('start', telegram_bot.start))
@@ -982,9 +1151,9 @@ def main():
     """Main entry point with reliability enhancements"""
     try:
         # Add version and startup info
-        logger.info(f"Starting RMT Study Bot v1.0.2 - 24/7 Edition")
+        logger.info(f"Starting RMT Study Bot v1.0.3 - 24/7 Edition")
         logger.info(f"Current Date and Time: {datetime.datetime.now(MANILA_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
-        logger.info(f"User: Zackrmt")
+        logger.info(f"User: {CURRENT_USER}")
         
         # Start the health check server
         start_keepalive_server()
