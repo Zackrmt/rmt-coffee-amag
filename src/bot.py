@@ -175,8 +175,9 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-def start_keepalive_server(port=10001):
+def start_keepalive_server():
     """Start the health check server in a separate thread."""
+    port = int(os.getenv('PORT', 10001))  # Use Render's PORT or default to 10001
     server = HTTPServer(('0.0.0.0', port), KeepaliveHandler)
     thread = threading.Thread(target=server.serve_forever)
     thread.daemon = True
@@ -388,13 +389,18 @@ class TelegramBot:
         
         welcome_text = "Welcome to RMT Study Bot! 📚✨"
         
-        await self.send_bot_message(
+        message = await self.send_bot_message(
             context,
             update.effective_chat.id,
             welcome_text,
             reply_markup=reply_markup,
             should_delete=False
         )
+        
+        # Store this message to keep it
+        if 'messages_to_keep' not in context.user_data:
+            context.user_data['messages_to_keep'] = []
+        context.user_data['messages_to_keep'].append(message)
         
         return CHOOSING_MAIN_MENU
 
@@ -836,8 +842,11 @@ async def run_bot_with_retries():
             application = Application.builder().token(os.getenv('TELEGRAM_BOT_TOKEN')).build()
             telegram_bot = TelegramBot()
             
+            # Add start command handler separately to avoid duplicate messages
+            application.add_handler(CommandHandler('start', telegram_bot.start))
+            
             conv_handler = ConversationHandler(
-                entry_points=[CommandHandler('start', lambda u, c: telegram_bot.start(u, c))],
+                entry_points=[CallbackQueryHandler(telegram_bot.ask_goal, pattern='^start_studying$')],
                 states={
                     CONFIRMING_CANCEL: [
                         CallbackQueryHandler(telegram_bot.handle_cancel_confirmation, pattern='^confirm_cancel$'),
@@ -871,7 +880,6 @@ async def run_bot_with_retries():
                     ]
                 },
                 fallbacks=[
-                    CommandHandler('start', lambda u, c: telegram_bot.start(u, c)),
                     CallbackQueryHandler(telegram_bot.cancel_operation, pattern='^cancel_operation$')
                 ],
                 per_message=False,
@@ -918,8 +926,7 @@ async def run_bot_with_retries():
 def main():
     """Main entry point with reliability enhancements"""
     try:
-        port = int(os.getenv('HEALTH_CHECK_PORT', 10001))
-        start_keepalive_server(port)
+        start_keepalive_server()  # Now uses PORT from environment
         
         time.sleep(5)
         
