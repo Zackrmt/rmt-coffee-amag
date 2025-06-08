@@ -3,7 +3,7 @@ services:
     name: mtle-study-bot
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: cd src && python bot.py
+    startCommand: gunicorn --worker-class gevent --workers 1 --bind 0.0.0.0:10001 bot:app
     plan: free
     healthCheckPath: /health
     envVars:
@@ -15,3 +15,5 @@ services:
         value: Asia/Manila
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: RENDER
+        value: "true"
