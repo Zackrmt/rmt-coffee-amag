@@ -23,6 +23,7 @@ from telegram.ext import (
     PersistenceInput,
     PicklePersistence
 )
+from telegram.error import Conflict  # Add this import to fix the error
 
 # Configure logging
 logging.basicConfig(
@@ -169,7 +170,7 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
-            self.wfile.write(b'OK')
+            self.wfile.write(b'Bot is alive!')  # Changed from 'OK' to 'Bot is alive!'
         elif self.path == '/ping':
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
@@ -319,19 +320,19 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b'OK')
+        self.wfile.write(b'Bot is alive!')  # Changed from 'OK' to 'Bot is alive!'
         
     def do_PUT(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b'OK')
+        self.wfile.write(b'Bot is alive!')  # Changed from 'OK' to 'Bot is alive!'
         
     def do_DELETE(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b'OK')
+        self.wfile.write(b'Bot is alive!')  # Changed from 'OK' to 'Bot is alive!'
 
     def log_message(self, format, *args):
         if args[0].startswith(('GET /health', 'GET /ping', 'GET / HTTP')):
@@ -1123,7 +1124,7 @@ class TelegramBot:
 # ================== ERROR HANDLER ==================
 async def error_handler(update, context):
     """Handle errors in the telegram bot."""
-    if isinstance(context.error, telegram.error.Conflict):
+    if isinstance(context.error, Conflict):  # Using Conflict directly now that it's properly imported
         logger.error("Conflict error detected: Another instance is running. Shutting down this instance.")
         shared_state.is_shutting_down = True
         os._exit(1)  # Force exit to allow Render to restart a fresh instance
@@ -1161,24 +1162,38 @@ async def run_bot_with_retries():
                 logger.error("No TELEGRAM_BOT_TOKEN provided in environment variables")
                 sys.exit(1)
             
+            # Make sure persistence directory exists
+            persistence_dir = os.path.dirname(PERSISTENCE_PATH)
+            if persistence_dir and not os.path.exists(persistence_dir):
+                try:
+                    os.makedirs(persistence_dir, exist_ok=True)
+                except Exception as e:
+                    logger.warning(f"Could not create persistence directory: {e}")
+            
             # Create persistence object to maintain conversation state across restarts
-            persistence = PicklePersistence(
-                filepath=PERSISTENCE_PATH,
-                store_data=PersistenceInput(
-                    chat_data=True,
-                    user_data=True,
-                    bot_data=True,
-                    callback_data=True,  # Important for buttons to work after restart
-                    conversation=True    # Keep conversation state
-                ),
-                update_interval=60,  # Save every 60 seconds
-            )
+            try:
+                persistence = PicklePersistence(
+                    filepath=PERSISTENCE_PATH,
+                    store_data=PersistenceInput(
+                        chat_data=True,
+                        user_data=True,
+                        bot_data=True,
+                        callback_data=True,  # Important for buttons to work after restart
+                        conversation=True    # Keep conversation state
+                    ),
+                    update_interval=60,  # Save every 60 seconds
+                )
+                logger.info(f"Created persistence with file: {PERSISTENCE_PATH}")
+            except Exception as e:
+                logger.error(f"Error creating persistence: {e}")
+                persistence = None
                 
             # Set up proper drop_pending_updates to avoid handling old messages
-            application = ApplicationBuilder() \
-                .token(token) \
-                .persistence(persistence) \
-                .build()
+            builder = ApplicationBuilder().token(token)
+            if persistence:
+                builder = builder.persistence(persistence)
+            
+            application = builder.build()
             
             telegram_bot = TelegramBot()
             telegram_bot.application = application
@@ -1229,7 +1244,7 @@ async def run_bot_with_retries():
                 per_message=False,
                 per_chat=True,
                 name="main_conversation",
-                persistent=True  # Enable persistence for the conversation
+                persistent=True if persistence else False  # Enable persistence only if available
             )
 
             application.add_handler(conv_handler)
@@ -1301,7 +1316,7 @@ async def run_bot_with_retries():
             await application.shutdown()
             break
             
-        except telegram.error.Conflict as e:
+        except Conflict as e:  # Using Conflict directly now that it's properly imported
             logger.error(f"Conflict error: {e}. Another instance is likely running.")
             shared_state.is_shutting_down = True
             break
