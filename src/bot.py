@@ -162,6 +162,14 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
                             <span class="metric-name">Active Threads:</span> 
                             {resources['threads']}
                         </div>
+                        <div class="metric">
+                            <span class="metric-name">Current Date and Time:</span> 
+                            {datetime.datetime.now(MANILA_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-name">User:</span> 
+                            Zackrmt
+                        </div>
                     </div>
                 </body>
             </html>
@@ -178,7 +186,8 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
 
 def start_keepalive_server():
     """Start the health check server in a separate thread."""
-    port = int(os.getenv('PORT', 10001))  # Use Render's PORT or default to 10001
+    # Use HEALTH_CHECK_PORT if available, otherwise fall back to PORT, then to default 10001
+    port = int(os.getenv('HEALTH_CHECK_PORT', os.getenv('PORT', 10001)))
     server = HTTPServer(('0.0.0.0', port), KeepaliveHandler)
     thread = threading.Thread(target=server.serve_forever)
     thread.daemon = True
@@ -841,7 +850,7 @@ def self_ping():
     """Ping our own health endpoint to keep the service alive."""
     try:
         import urllib.request
-        port = int(os.getenv('PORT', 10001))
+        port = int(os.getenv('HEALTH_CHECK_PORT', os.getenv('PORT', 10001)))
         urllib.request.urlopen(f"http://localhost:{port}/health", timeout=10)
     except Exception as e:
         logger.warning(f"Self-ping failed: {e}")
@@ -972,16 +981,22 @@ async def run_bot_with_retries():
 def main():
     """Main entry point with reliability enhancements"""
     try:
-        start_keepalive_server()  # Now uses PORT from environment
+        # Add version and startup info
+        logger.info(f"Starting RMT Study Bot v1.0.2 - 24/7 Edition")
+        logger.info(f"Current Date and Time: {datetime.datetime.now(MANILA_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        logger.info(f"User: Zackrmt")
         
-        time.sleep(5)
+        # Start the health check server
+        start_keepalive_server()
+        logger.info(f"Health check server started with HEALTH_CHECK_PORT: {os.getenv('HEALTH_CHECK_PORT', os.getenv('PORT', 10001))}")
+        
+        time.sleep(5)  # Give the server time to start
         
         startup_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        current_user = "Zackrmt"
         logger.info(f"Bot starting at {startup_time}")
-        logger.info(f"Started by user: {current_user}")
         logger.info("Initializing bot application...")
         
+        # Run the bot with retries
         asyncio.run(run_bot_with_retries())
         
     except Exception as e:
