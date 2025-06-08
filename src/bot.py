@@ -4,6 +4,7 @@ import logging
 import asyncio
 import datetime
 import threading
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Optional
 import pytz
@@ -21,7 +22,11 @@ from telegram.ext import (
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('bot.log')
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -61,14 +66,106 @@ SUBJECTS = {
     "Others🤓": "OTHERS"
 }
 
-# Health Check Handler
-class HealthCheckHandler(BaseHTTPRequestHandler):
+# ================== RESOURCE MONITOR ==================
+class ResourceMonitor:
+    @staticmethod
+    def get_status():
+        try:
+            import psutil
+            return {
+                "cpu": psutil.cpu_percent(),
+                "memory": psutil.virtual_memory().percent,
+                "boot_time": datetime.datetime.fromtimestamp(psutil.boot_time()).isoformat(),
+                "process_uptime": time.time() - psutil.Process().create_time(),
+                "threads": threading.active_count()
+            }
+        except Exception as e:
+            logger.error(f"Resource monitoring error: {e}")
+            return {
+                "cpu": "N/A",
+                "memory": "N/A",
+                "boot_time": "N/A",
+                "process_uptime": "N/A",
+                "threads": "N/A"
+            }
+
+# ================== KEEPALIVE SERVER ==================
+class KeepaliveHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        global telegram_bot
+        
         if self.path == '/health':
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
             self.wfile.write(b'OK')
+        elif self.path == '/ping':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(f"pong {datetime.datetime.now().isoformat()}".encode())
+        elif self.path == '/status':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            resources = ResourceMonitor.get_status()
+            active_sessions = len(telegram_bot.study_sessions) if 'telegram_bot' in globals() else 0
+            status_html = f"""
+            <html>
+                <head>
+                    <title>RMT Study Bot Status</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                        h1 {{ color: #2c3e50; }}
+                        .status-box {{ 
+                            border: 1px solid #ddd; 
+                            padding: 15px; 
+                            margin-bottom: 20px; 
+                            border-radius: 5px;
+                            background-color: #f9f9f9;
+                        }}
+                        .metric {{ margin-bottom: 10px; }}
+                        .metric-name {{ font-weight: bold; }}
+                        .session-list {{ margin-top: 20px; }}
+                    </style>
+                </head>
+                <body>
+                    <h1>📚 RMT Study Bot Status</h1>
+                    <div class="status-box">
+                        <h2>System Health</h2>
+                        <div class="metric">
+                            <span class="metric-name">Last Activity:</span> 
+                            {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-name">Active Sessions:</span> 
+                            {active_sessions}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-name">CPU Usage:</span> 
+                            {resources['cpu']}%
+                        </div>
+                        <div class="metric">
+                            <span class="metric-name">Memory Usage:</span> 
+                            {resources['memory']}%
+                        </div>
+                        <div class="metric">
+                            <span class="metric-name">System Uptime:</span> 
+                            {resources['boot_time']}
+                        </div>
+                        <div class="metric">
+                            <span class="metric-name">Process Uptime:</span> 
+                            {int(resources['process_uptime'])} seconds
+                        </div>
+                        <div class="metric">
+                            <span class="metric-name">Active Threads:</span> 
+                            {resources['threads']}
+                        </div>
+                    </div>
+                </body>
+            </html>
+            """
+            self.wfile.write(status_html.encode())
         else:
             self.send_response(404)
             self.send_header('Content-type', 'text/plain')
@@ -76,22 +173,22 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.wfile.write(b'Not Found')
 
     def log_message(self, format, *args):
-        # Suppress logging of health check requests
         pass
 
-def start_health_server(port):
+def start_keepalive_server(port=10001):
     """Start the health check server in a separate thread."""
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server = HTTPServer(('0.0.0.0', port), KeepaliveHandler)
     thread = threading.Thread(target=server.serve_forever)
     thread.daemon = True
     thread.start()
-    logger.info("Health check server started on port %d", port)
+    logger.info(f"Keepalive server started on port {port}")
 
+# ================== STUDY SESSION CLASS ==================
 class StudySession:
     def __init__(self, user_id: int, subject: str, goal_time: Optional[str] = None):
         self.user_id = user_id
         self.subject = subject
-        self.goal_time = goal_time  # Can now be in HH:MM format
+        self.goal_time = goal_time
         self.start_time = datetime.datetime.now(PST_TZ)
         self.end_time = None
         self.break_periods = []
@@ -136,11 +233,9 @@ class StudySession:
         """Calculate total break time."""
         total_break = datetime.timedelta()
         
-        # Add completed breaks
         for break_period in self.break_periods:
             total_break += break_period['end'] - break_period['start']
         
-        # Add current break if on break
         if self.is_on_break and self.break_start:
             current_time = datetime.datetime.now(PST_TZ)
             total_break += current_time - self.break_start
@@ -158,7 +253,6 @@ class StudySession:
         if break_minutes == 0:
             return f"{study_minutes}:0"
         
-        # Find the GCD for simplification
         def gcd(a, b):
             while b:
                 a, b = b, a % b
@@ -172,7 +266,6 @@ class StudySession:
         if not self.goal_time:
             return 0
         
-        # Parse goal time (now supports HH:MM format)
         try:
             if ':' in self.goal_time:
                 hours, minutes = map(int, self.goal_time.split(':'))
@@ -203,20 +296,19 @@ class StudySession:
             
         return times
 
+# ================== TELEGRAM BOT CLASS ==================
 class TelegramBot:
     def __init__(self):
         self.study_sessions: Dict[int, StudySession] = {}
+        self.last_activity = datetime.datetime.now()
 
     async def cleanup_all_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clean up ALL messages including those marked to keep."""
-        # Get all messages to delete
         messages_to_delete = context.user_data.get('messages_to_delete', [])
         messages_to_keep = context.user_data.get('messages_to_keep', [])
         
-        # Combine all message IDs
         all_messages = messages_to_delete + messages_to_keep
         
-        # Delete each message
         for message_id in all_messages:
             try:
                 await context.bot.delete_message(
@@ -226,16 +318,13 @@ class TelegramBot:
             except Exception as e:
                 logger.error(f"Error deleting message {message_id}: {e}")
         
-        # Clear both lists
         context.user_data['messages_to_delete'] = []
         context.user_data['messages_to_keep'] = []
     
     async def cleanup_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clean up messages that should be deleted."""
-        # Get list of messages to delete from context
         messages_to_delete = context.user_data.get('messages_to_delete', [])
         
-        # Delete each message
         for message_id in messages_to_delete:
             try:
                 await context.bot.delete_message(
@@ -245,7 +334,6 @@ class TelegramBot:
             except Exception as e:
                 logger.error(f"Error deleting message {message_id}: {e}")
         
-        # Clear the list
         context.user_data['messages_to_delete'] = []
 
     async def send_bot_message(
@@ -257,7 +345,9 @@ class TelegramBot:
         should_delete: bool = True
     ) -> int:
         """Send a bot message and track it for cleanup if needed."""
-        # Set thread_id from the update if available
+        # Update last activity timestamp
+        self.record_activity()
+        
         thread_id = None
         if 'thread_id' in context.user_data:
             thread_id = context.user_data['thread_id']
@@ -278,9 +368,14 @@ class TelegramBot:
         
         return message.message_id
 
+    async def record_activity(self):
+        """Update last activity timestamp"""
+        self.last_activity = datetime.datetime.now()
+
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Start the conversation and ask if user wants to study."""
         await self.cleanup_messages(update, context)
+        self.record_activity()
         
         # Store the thread_id if the message is in a topic
         if update.message and update.message.is_topic_message:
@@ -291,7 +386,6 @@ class TelegramBot:
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
         
-        # Simplified welcome message
         welcome_text = "Welcome to RMT Study Bot! 📚✨"
         
         await self.send_bot_message(
@@ -299,19 +393,19 @@ class TelegramBot:
             update.effective_chat.id,
             welcome_text,
             reply_markup=reply_markup,
-            should_delete=False  # Keep the welcome message
+            should_delete=False
         )
         
         return CHOOSING_MAIN_MENU
 
     async def ask_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Ask user to set a study goal."""
+        self.record_activity()
         context.user_data['previous_state'] = CHOOSING_MAIN_MENU
         query = update.callback_query
         await query.answer()
         await self.cleanup_messages(update, context)
 
-        # Create buttons for preset hours and custom option
         buttons = [
             [
                 InlineKeyboardButton("1 Hour", callback_data='goal_1'),
@@ -340,7 +434,6 @@ class TelegramBot:
             reply_markup=reply_markup
         )
         
-        # Delete the clicked button's message
         try:
             await query.message.delete()
         except Exception as e:
@@ -350,17 +443,16 @@ class TelegramBot:
 
     async def handle_goal_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle goal selection or prompt for custom goal."""
+        self.record_activity()
         query = update.callback_query
         await query.answer()
         
-        # Delete the clicked button's message
         try:
             await query.message.delete()
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
 
         if query.data == 'goal_custom':
-            # Prompt for custom goal input
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
@@ -375,8 +467,8 @@ class TelegramBot:
 
     async def handle_custom_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle custom goal time input."""
+        self.record_activity()
         try:
-            # Validate input format (HH:MM)
             goal_input = update.message.text.strip()
             hours, minutes = map(int, goal_input.split(':'))
             
@@ -385,7 +477,6 @@ class TelegramBot:
                 
             context.user_data['goal_time'] = goal_input
             
-            # Delete the user's input message
             try:
                 await update.message.delete()
             except Exception as e:
@@ -403,8 +494,8 @@ class TelegramBot:
 
     async def show_subject_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Show subject selection buttons."""
+        self.record_activity()
         context.user_data['previous_state'] = SETTING_GOAL
-        # Create buttons for subjects in a 3-column grid
         buttons = []
         current_row = []
         
@@ -414,14 +505,13 @@ class TelegramBot:
                 callback_data=f'subject_{subject_code}'
             ))
             
-            if len(current_row) == 3:  # Three buttons per row
+            if len(current_row) == 3:
                 buttons.append(current_row)
                 current_row = []
         
-        if current_row:  # Add any remaining buttons
+        if current_row:
             buttons.append(current_row)
             
-        # Add cancel button at the bottom
         buttons.append([InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')])
         
         reply_markup = InlineKeyboardMarkup(buttons)
@@ -438,10 +528,10 @@ class TelegramBot:
 
     async def start_studying(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Start a study session for the selected subject."""
+        self.record_activity()
         query = update.callback_query
         await query.answer()
         
-        # Delete the clicked button's message
         try:
             await query.message.delete()
         except Exception as e:
@@ -451,7 +541,6 @@ class TelegramBot:
         subject_code = query.data.split('_')[1]
         subject_name = next((name for name, code in SUBJECTS.items() if code == subject_code), subject_code)
         
-        # Create new study session
         self.study_sessions[user.id] = StudySession(
             user_id=user.id,
             subject=subject_name,
@@ -460,7 +549,6 @@ class TelegramBot:
         
         session_start_time = self.study_sessions[user.id].start_time.astimezone(MANILA_TZ)
         
-        # Message 1 (Keep forever) - Updated with username
         user_name = user.first_name or user.username or "User"
         await self.send_bot_message(
             context,
@@ -469,14 +557,13 @@ class TelegramBot:
             should_delete=False
         )
         
-        # Message 2 (Keep forever)
         await self.send_bot_message(
             context,
             update.effective_chat.id,
             f"Subject: {subject_name}",
             should_delete=False
         )
-        # Message 2 (Delete after new session)
+        
         await self.send_bot_message(
             context,
             update.effective_chat.id,
@@ -484,7 +571,6 @@ class TelegramBot:
             should_delete=True
         )
         
-        # Message 3 (Delete after new session)
         if context.user_data.get('goal_time'):
             await self.send_bot_message(
                 context,
@@ -493,7 +579,6 @@ class TelegramBot:
                 should_delete=True
             )
 
-        # Create buttons for study controls
         buttons = [
             [
                 InlineKeyboardButton("Take a Break ☕", callback_data='start_break'),
@@ -515,10 +600,10 @@ class TelegramBot:
 
     async def handle_break(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle break start/end."""
+        self.record_activity()
         query = update.callback_query
         await query.answer()
         
-        # Delete the clicked button's message
         try:
             await query.message.delete()
         except Exception as e:
@@ -546,14 +631,13 @@ class TelegramBot:
             ]
             reply_markup = InlineKeyboardMarkup(buttons)
             
-            # Break start message (keep forever)
             break_start_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
                 f"☕ Break started at {break_start_time.strftime('%I:%M %p')}",
                 reply_markup=reply_markup,
-                should_delete=False  # Keep break message forever
+                should_delete=False
             )
             return ON_BREAK
                 
@@ -568,23 +652,22 @@ class TelegramBot:
             ]
             reply_markup = InlineKeyboardMarkup(buttons)
             
-            # Break end message (keep forever)
             break_end_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
                 f"▶️ Break ended at {break_end_time.strftime('%I:%M %p')}\nBack to studying!",
                 reply_markup=reply_markup,
-                should_delete=False  # Keep break message forever
+                should_delete=False
             )
             return STUDYING
 
     async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """End the study session and show summary."""
+        self.record_activity()
         query = update.callback_query
         await query.answer()
         
-        # Delete the clicked button's message
         try:
             await query.message.delete()
         except Exception as e:
@@ -605,7 +688,6 @@ class TelegramBot:
         manila_times = session.get_formatted_manila_times()
         
         try:
-            # Message 1: Summary (keep forever)
             user_name = user.first_name or user.username or "User"
             summary_msg = await self.send_bot_message(
                 context,
@@ -614,12 +696,10 @@ class TelegramBot:
                 should_delete=False
             )
             
-            # Store message ID as one to keep
             if 'messages_to_keep' not in context.user_data:
                 context.user_data['messages_to_keep'] = []
             context.user_data['messages_to_keep'].append(summary_msg)
 
-            # Message 2: Total Study Time (keep forever)
             study_time = session.get_total_study_time()
             study_time_msg = await self.send_bot_message(
                 context,
@@ -629,20 +709,18 @@ class TelegramBot:
             )
             context.user_data['messages_to_keep'].append(study_time_msg)
 
-            # Message 3: Session Times, Goal Progress, and Break Details (delete on new session)
             session_info = [
                 f"Started: {manila_times['start'].strftime('%I:%M %p')}",
                 f"Ended: {manila_times['end'].strftime('%I:%M %p')}"
             ]
             
-            # Add goal progress if there's a goal
             if context.user_data.get('goal_time'):
                 progress_percentage = session.get_progress_percentage()
-                session_info.append("")  # Add blank line
+                session_info.append("")
                 session_info.append(f"Goal Progress: {progress_percentage}%")
             
             if session.break_periods:
-                session_info.append("")  # Add blank line
+                session_info.append("")
                 session_info.append("Break Details:")
                 for break_period in manila_times['breaks']:
                     session_info.append(
@@ -657,7 +735,6 @@ class TelegramBot:
                 should_delete=True
             )
 
-            # Message 4: Celebration (keep forever)
             celebration_msg = await self.send_bot_message(
                 context,
                 update.effective_chat.id,
@@ -666,7 +743,6 @@ class TelegramBot:
             )
             context.user_data['messages_to_keep'].append(celebration_msg)
 
-            # Message 5: Motivational message (delete on new session)
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
@@ -674,7 +750,6 @@ class TelegramBot:
                 should_delete=True
             )
 
-            # Create buttons for next action
             buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
             reply_markup = InlineKeyboardMarkup(buttons)
             
@@ -693,17 +768,16 @@ class TelegramBot:
                 "There was an error ending your session. Please try again."
             )
 
-        # Clear the session
         del self.study_sessions[user.id]
         return CHOOSING_MAIN_MENU
 
     async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Show cancel confirmation dialog."""
+        self.record_activity()
         query = update.callback_query
         if query:
             await query.answer()
             
-            # Delete the clicked button's message
             try:
                 await query.message.delete()
             except Exception as e:
@@ -729,103 +803,138 @@ class TelegramBot:
 
     async def handle_cancel_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle the cancel confirmation response."""
+        self.record_activity()
         query = update.callback_query
         await query.answer()
         
-        # Delete the confirmation message
         try:
             await query.message.delete()
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
 
         if query.data == 'confirm_cancel':
-            # Clean up any current operations
             user = update.effective_user
             if user.id in self.study_sessions:
                 del self.study_sessions[user.id]
             
-            # Only clean up messages_to_delete, NOT messages_to_keep
-            await self.cleanup_messages(update, context)  # Changed from cleanup_all_messages
+            await self.cleanup_messages(update, context)
             return await self.start(update, context)
             
-        else:  # reject_cancel
-            # Return to previous state
+        else:
             return context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
 
-def main() -> None:
-    """Start the bot."""
-    # Add startup logging with current timestamp
-    startup_time = "2025-06-06 20:34:51"  # Current UTC time
-    current_user = "Zackrmt"
+# ================== RELIABILITY IMPROVEMENTS ==================
+async def run_bot_with_retries():
+    """Run the bot with automatic retries and permanent operation"""
+    global telegram_bot
     
-    logger.info(f"Bot starting at {startup_time} UTC")
-    logger.info(f"Started by user: {current_user}")
-    logger.info("Initializing bot application...")
+    max_retries = 5
+    retry_delay = 10
+    
+    for attempt in range(max_retries):
+        try:
+            application = Application.builder().token(os.getenv('TELEGRAM_BOT_TOKEN')).build()
+            telegram_bot = TelegramBot()
+            
+            conv_handler = ConversationHandler(
+                entry_points=[CommandHandler('start', lambda u, c: telegram_bot.start(u, c))],
+                states={
+                    CONFIRMING_CANCEL: [
+                        CallbackQueryHandler(telegram_bot.handle_cancel_confirmation, pattern='^confirm_cancel$'),
+                        CallbackQueryHandler(telegram_bot.handle_cancel_confirmation, pattern='^reject_cancel$')
+                    ],
+                    CHOOSING_MAIN_MENU: [
+                        CallbackQueryHandler(telegram_bot.ask_goal, pattern='^start_studying$')
+                    ],
+                    SETTING_GOAL: [
+                        CallbackQueryHandler(telegram_bot.handle_goal_selection, pattern='^goal_'),
+                        CallbackQueryHandler(telegram_bot.handle_goal_selection, pattern='^no_goal$'),
+                        CallbackQueryHandler(telegram_bot.cancel_operation, pattern='^cancel_operation$')
+                    ],
+                    SETTING_CUSTOM_GOAL: [
+                        MessageHandler(filters.TEXT & ~filters.COMMAND, telegram_bot.handle_custom_goal),
+                        CallbackQueryHandler(telegram_bot.cancel_operation, pattern='^cancel_operation$')
+                    ],
+                    CHOOSING_SUBJECT: [
+                        CallbackQueryHandler(telegram_bot.start_studying, pattern='^subject_'),
+                        CallbackQueryHandler(telegram_bot.cancel_operation, pattern='^cancel_operation$')
+                    ],
+                    STUDYING: [
+                        CallbackQueryHandler(telegram_bot.handle_break, pattern='^start_break$'),
+                        CallbackQueryHandler(telegram_bot.end_session, pattern='^end_session$'),
+                        CallbackQueryHandler(telegram_bot.cancel_operation, pattern='^cancel_operation$')
+                    ],
+                    ON_BREAK: [
+                        CallbackQueryHandler(telegram_bot.handle_break, pattern='^end_break$'),
+                        CallbackQueryHandler(telegram_bot.end_session, pattern='^end_session$'),
+                        CallbackQueryHandler(telegram_bot.cancel_operation, pattern='^cancel_operation$')
+                    ]
+                },
+                fallbacks=[
+                    CommandHandler('start', lambda u, c: telegram_bot.start(u, c)),
+                    CallbackQueryHandler(telegram_bot.cancel_operation, pattern='^cancel_operation$')
+                ],
+                per_message=False,
+                per_chat=True,
+                name="main_conversation"
+            )
 
-    # Create the Application and pass it your bot's token
-    application = Application.builder().token(os.getenv('TELEGRAM_BOT_TOKEN')).build()
+            application.add_handler(conv_handler)
+            
+            await application.initialize()
+            await application.start()
+            await application.updater.start_polling(
+                poll_interval=3,
+                timeout=20,
+                drop_pending_updates=True
+            )
+            logger.info("Bot is now running and polling 24/7")
 
-    # Health check server setup
+            while True:
+                inactive_time = (datetime.datetime.now() - telegram_bot.last_activity).total_seconds()
+                if inactive_time > 1800:
+                    logger.error(f"No activity for {inactive_time} seconds, restarting...")
+                    raise RuntimeError("Activity timeout")
+                
+                if datetime.datetime.now().minute % 5 == 0:
+                    try:
+                        await application.bot.get_me()
+                        logger.debug("Performed health check")
+                    except Exception as e:
+                        logger.error(f"Health check failed: {e}")
+                
+                await asyncio.sleep(1)
+            
+        except Exception as e:
+            logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.error("Max retries reached. Exiting.")
+                raise
+
+# ================== MAIN ENTRY POINT ==================
+def main():
+    """Main entry point with reliability enhancements"""
     try:
         port = int(os.getenv('HEALTH_CHECK_PORT', 10001))
-        start_health_server(port)
+        start_keepalive_server(port)
+        
+        time.sleep(5)
+        
+        startup_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        current_user = "Zackrmt"
+        logger.info(f"Bot starting at {startup_time}")
+        logger.info(f"Started by user: {current_user}")
+        logger.info("Initializing bot application...")
+        
+        asyncio.run(run_bot_with_retries())
+        
     except Exception as e:
-        logger.error(f"Error starting health check server: {str(e)}")
-
-    logger.info("Setting up conversation handlers...")
-    
-    # Initialize bot instance
-    bot = TelegramBot()
-    
-    # Set up conversation handler
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', lambda u, c: bot.start(u, c))],
-        states={
-            CONFIRMING_CANCEL: [
-                CallbackQueryHandler(bot.handle_cancel_confirmation, pattern='^confirm_cancel$'),
-                CallbackQueryHandler(bot.handle_cancel_confirmation, pattern='^reject_cancel$')
-            ],
-            CHOOSING_MAIN_MENU: [
-                CallbackQueryHandler(bot.ask_goal, pattern='^start_studying$')
-            ],
-            SETTING_GOAL: [
-                CallbackQueryHandler(bot.handle_goal_selection, pattern='^goal_'),
-                CallbackQueryHandler(bot.handle_goal_selection, pattern='^no_goal$'),
-                CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
-            ],
-            SETTING_CUSTOM_GOAL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_custom_goal),
-                CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
-            ],
-            CHOOSING_SUBJECT: [
-                CallbackQueryHandler(bot.start_studying, pattern='^subject_'),
-                CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
-            ],
-            STUDYING: [
-                CallbackQueryHandler(bot.handle_break, pattern='^start_break$'),
-                CallbackQueryHandler(bot.end_session, pattern='^end_session$'),
-                CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
-            ],
-            ON_BREAK: [
-                CallbackQueryHandler(bot.handle_break, pattern='^end_break$'),
-                CallbackQueryHandler(bot.end_session, pattern='^end_session$'),
-                CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
-            ]
-        },
-        fallbacks=[
-            CommandHandler('start', lambda u, c: bot.start(u, c)),
-            CallbackQueryHandler(bot.cancel_operation, pattern='^cancel_operation$')
-        ],
-        per_message=False,
-        per_chat=True,
-        name="main_conversation"
-    )
-
-    # Add handlers
-    application.add_handler(conv_handler)
-
-    # Start the Bot
-    application.run_polling()
+        logger.error(f"Fatal error: {str(e)}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
+
