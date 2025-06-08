@@ -5,6 +5,7 @@ import asyncio
 import datetime
 import threading
 import time
+import signal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Optional, Set
 import pytz
@@ -30,6 +31,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Reduce HTTP request logging verbosity
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('telegram.request').setLevel(logging.WARNING)
+
 # Timezone configurations
 PST_TZ = pytz.timezone('America/Los_Angeles')
 MANILA_TZ = pytz.timezone('Asia/Manila')
@@ -37,6 +42,12 @@ MANILA_TZ = pytz.timezone('Asia/Manila')
 # Current date and user information
 CURRENT_DATE = "2025-06-08"
 CURRENT_USER = "Zackrmt"
+
+# Flag to track if the server is shutting down
+is_shutting_down = False
+
+# Process ID file for single instance check
+PID_FILE = "/tmp/rmt_study_bot.pid"
 
 # Conversation states
 (
@@ -70,6 +81,51 @@ SUBJECTS = {
     "Others🤓": "OTHERS"
 }
 
+# ================== SINGLE INSTANCE CHECK ==================
+def ensure_single_instance():
+    """Ensure only one instance of the bot is running."""
+    try:
+        # Check if PID file exists
+        if os.path.exists(PID_FILE):
+            with open(PID_FILE, 'r') as f:
+                old_pid = int(f.read().strip())
+            
+            # Check if process with this PID exists and it's our script
+            try:
+                # Send signal 0 to check if process exists without actually sending a signal
+                os.kill(old_pid, 0)
+                
+                # Process exists, let's check if it's a Python process (very rough check)
+                # This might not work on all platforms but good enough for Render
+                import psutil
+                if psutil.pid_exists(old_pid):
+                    proc = psutil.Process(old_pid)
+                    if 'python' in proc.name().lower() or 'python' in ' '.join(proc.cmdline()).lower():
+                        logger.warning(f"Another instance is already running with PID {old_pid}. Exiting.")
+                        sys.exit(1)
+            except OSError:
+                # Process doesn't exist
+                logger.info(f"Stale PID file found. Previous instance (PID {old_pid}) is not running.")
+        
+        # Write our PID to the file
+        with open(PID_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        logger.info(f"PID {os.getpid()} written to {PID_FILE}")
+        
+        # Register cleanup to remove PID file on exit
+        def cleanup_pid_file():
+            try:
+                if os.path.exists(PID_FILE):
+                    os.remove(PID_FILE)
+                    logger.info(f"Removed PID file {PID_FILE}")
+            except Exception as e:
+                logger.error(f"Error removing PID file: {e}")
+        
+        atexit.register(cleanup_pid_file)
+        
+    except Exception as e:
+        logger.error(f"Error checking/creating PID file: {e}")
+
 # ================== RESOURCE MONITOR ==================
 class ResourceMonitor:
     @staticmethod
@@ -96,7 +152,7 @@ class ResourceMonitor:
 # ================== KEEPALIVE SERVER ==================
 class KeepaliveHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        global telegram_bot
+        global telegram_bot, is_shutting_down
         
         if self.path == '/health' or self.path == '/':  # Add root path for UptimeRobot
             self.send_response(200)
@@ -113,8 +169,19 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'text/html')
             self.end_headers()
             resources = ResourceMonitor.get_status()
-            active_sessions = len(telegram_bot.study_sessions) if 'telegram_bot' in globals() else 0
-            pending_sessions = len(telegram_bot.pending_sessions) if 'telegram_bot' in globals() else 0
+            
+            # Handle case where telegram_bot might not be initialized yet
+            active_sessions = 0
+            pending_sessions = 0
+            last_activity_time = datetime.datetime.now()
+            
+            if 'telegram_bot' in globals() and telegram_bot:
+                active_sessions = len(telegram_bot.study_sessions)
+                pending_sessions = len(telegram_bot.pending_sessions)
+                last_activity_time = telegram_bot.last_activity
+            
+            status = "Running" if not is_shutting_down else "Shutting Down"
+            status_class = "good" if not is_shutting_down else "warning"
             
             status_html = f"""
             <html>
@@ -145,11 +212,11 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
                         <h2>System Health</h2>
                         <div class="metric">
                             <span class="metric-name">Status:</span> 
-                            <span class="good">Running</span>
+                            <span class="{status_class}">{status}</span>
                         </div>
                         <div class="metric">
                             <span class="metric-name">Last Activity:</span> 
-                            {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                            {last_activity_time.strftime('%Y-%m-%d %H:%M:%S')}
                         </div>
                         <div class="metric">
                             <span class="metric-name">Active Sessions:</span> 
@@ -176,6 +243,10 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
                             {int(resources['process_uptime'])} seconds
                         </div>
                         <div class="metric">
+                            <span class="metric-name">Process ID:</span> 
+                            {os.getpid()}
+                        </div>
+                        <div class="metric">
                             <span class="metric-name">Active Threads:</span> 
                             {resources['threads']}
                         </div>
@@ -187,16 +258,36 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
                             <span class="metric-name">User:</span> 
                             {CURRENT_USER}
                         </div>
+                        <div class="metric">
+                            <span class="metric-name">Environment:</span> 
+                            {'Production' if os.getenv('RENDER') else 'Development'}
+                        </div>
                     </div>
                 </body>
             </html>
             """
             self.wfile.write(status_html.encode())
+        elif self.path == '/shutdown':
+            # Security: In a real production app, you would add authentication here
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'Shutting down...')
+            
+            # Initiate shutdown
+            global is_shutting_down
+            is_shutting_down = True
+            threading.Thread(target=self.shutdown_application).start()
         else:
             self.send_response(404)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
             self.wfile.write(b'Not Found')
+
+    def shutdown_application(self):
+        """Shut down the application gracefully."""
+        time.sleep(1)  # Give the response time to complete
+        os.kill(os.getpid(), signal.SIGTERM)
 
     # Override all methods to handle UptimeRobot requests
     def do_HEAD(self):
@@ -227,15 +318,27 @@ class KeepaliveHandler(BaseHTTPRequestHandler):
             return  # Don't log health check requests
         logger.info("%s - - [%s] %s" % (self.client_address[0], self.log_date_time_string(), format % args))
 
-def start_keepalive_server():
-    """Start the health check server in a separate thread."""
-    # Use HEALTH_CHECK_PORT if available, otherwise fall back to PORT, then to default 10001
-    port = int(os.getenv('HEALTH_CHECK_PORT', os.getenv('PORT', 10001)))
-    server = HTTPServer(('0.0.0.0', port), KeepaliveHandler)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.daemon = True
-    thread.start()
-    logger.info(f"Keepalive server started on port {port}")
+class KeepaliveServer:
+    def __init__(self):
+        self.server = None
+        self.thread = None
+        
+    def start(self):
+        """Start the health check server in a separate thread."""
+        # Use HEALTH_CHECK_PORT if available, otherwise fall back to PORT, then to default 10001
+        port = int(os.getenv('HEALTH_CHECK_PORT', os.getenv('PORT', 10001)))
+        self.server = HTTPServer(('0.0.0.0', port), KeepaliveHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever)
+        self.thread.daemon = True
+        self.thread.start()
+        logger.info(f"Keepalive server started on port {port}")
+        
+    def stop(self):
+        """Stop the server gracefully."""
+        if self.server:
+            self.server.shutdown()
+            self.server.server_close()
+            logger.info("Keepalive server stopped")
 
 # ================== STUDY SESSION CLASS ==================
 class StudySession:
@@ -366,6 +469,7 @@ class TelegramBot:
         self.pending_sessions: Dict[int, PendingSession] = {}
         self.last_activity = datetime.datetime.now()
         self.start_command_handlers: Set[int] = set()  # Track users who have already triggered /start
+        self.application = None
 
     async def cleanup_all_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clean up ALL messages including those marked to keep."""
@@ -488,7 +592,7 @@ class TelegramBot:
         # Add this user to pending sessions
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
-        thread_id = update.message.message_thread_id if update.message.is_topic_message else None
+        thread_id = update.message.message_thread_id if update.message and update.message.is_topic_message else None
         
         # Create a pending session
         self.pending_sessions[user_id] = PendingSession(
@@ -516,13 +620,13 @@ class TelegramBot:
             await asyncio.sleep(30 * 60)  # 30 minutes
             
             # Check if this pending session still exists and hasn't been completed
-            if user_id in self.pending_sessions:
+            if user_id in self.pending_sessions and self.application:
                 pending_session = self.pending_sessions[user_id]
                 
                 # Delete all associated messages
                 for message_id in pending_session.message_ids:
                     try:
-                        await telegram_bot.application.bot.delete_message(
+                        await self.application.bot.delete_message(
                             chat_id=pending_session.chat_id,
                             message_id=message_id
                         )
@@ -532,7 +636,7 @@ class TelegramBot:
                 # Notify the user
                 try:
                     thread_id = pending_session.thread_id
-                    await telegram_bot.application.bot.send_message(
+                    await self.application.bot.send_message(
                         chat_id=pending_session.chat_id,
                         text="Your study session setup was automatically cancelled due to inactivity (30 minutes timeout).",
                         message_thread_id=thread_id
@@ -1010,8 +1114,13 @@ class TelegramBot:
 # ================== ERROR HANDLER ==================
 async def error_handler(update, context):
     """Handle errors in the telegram bot."""
-    logger.error(f"Exception while handling an update: {context.error}")
-    # Continue operation despite errors
+    if isinstance(context.error, telegram.error.Conflict):
+        logger.error("Conflict error detected: Another instance is running. Shutting down this instance.")
+        global is_shutting_down
+        is_shutting_down = True
+        os._exit(1)  # Force exit to allow Render to restart a fresh instance
+    else:
+        logger.error(f"Exception while handling an update: {context.error}")
 
 # ================== SELF-PING FUNCTION ==================
 def self_ping():
@@ -1026,19 +1135,33 @@ def self_ping():
 # ================== RELIABILITY IMPROVEMENTS ==================
 async def run_bot_with_retries():
     """Run the bot with automatic retries and permanent operation"""
-    global telegram_bot
+    global telegram_bot, is_shutting_down
     
-    max_retries = 10  # Increased from 5
-    retry_delay = 30  # Increased from 10
+    keepalive_server = KeepaliveServer()
+    keepalive_server.start()
+    
+    max_retries = 10
+    retry_delay = 30
     
     for attempt in range(max_retries):
-        try:
-            # Create persistent application
-            application = Application.builder().token(os.getenv('TELEGRAM_BOT_TOKEN')).build()
-            telegram_bot = TelegramBot()
-            telegram_bot.application = application  # Store application reference for cleanup tasks
+        if is_shutting_down:
+            logger.info("Shutdown signal received. Exiting...")
+            break
             
-            # Add start command handler separately to avoid duplicate messages
+        try:
+            # Create application with proper token
+            token = os.getenv('TELEGRAM_BOT_TOKEN')
+            if not token:
+                logger.error("No TELEGRAM_BOT_TOKEN provided in environment variables")
+                sys.exit(1)
+                
+            # Set up proper drop_pending_updates to avoid handling old messages
+            application = Application.builder().token(token).build()
+            
+            telegram_bot = TelegramBot()
+            telegram_bot.application = application
+            
+            # Add start command handler
             application.add_handler(CommandHandler('start', telegram_bot.start))
             
             conv_handler = ConversationHandler(
@@ -1084,29 +1207,37 @@ async def run_bot_with_retries():
             )
 
             application.add_handler(conv_handler)
-            
-            # Add an error handler
             application.add_error_handler(error_handler)
             
+            # First try to delete any existing webhook
+            await application.bot.delete_webhook(drop_pending_updates=True)
+            
+            # Initialize and start the application
             await application.initialize()
             await application.start()
+            
+            # Start polling with critical fix: force drop_pending_updates=True
+            # This fixes the "terminated by other getUpdates request" error
             await application.updater.start_polling(
                 poll_interval=3,
-                timeout=30,  # Increased timeout
-                drop_pending_updates=True
+                timeout=30,
+                drop_pending_updates=True,
+                read_timeout=30,
+                write_timeout=30
             )
+            
             logger.info("Bot is now running and polling 24/7")
 
             # Self-healing watchdog
             last_health_check = datetime.datetime.now()
-            while True:
+            while not is_shutting_down:
                 current_time = datetime.datetime.now()
                 
                 # Check for inactivity and perform health check
                 inactive_time = (current_time - telegram_bot.last_activity).total_seconds()
                 health_check_due = (current_time - last_health_check).total_seconds() > 300  # Every 5 minutes
                 
-                if inactive_time > 3600:  # 1 hour inactivity threshold (increased)
+                if inactive_time > 3600:  # 1 hour inactivity threshold
                     logger.warning(f"No activity for {inactive_time//60} minutes, performing health check...")
                     try:
                         await application.bot.get_me()
@@ -1136,37 +1267,66 @@ async def run_bot_with_retries():
                 
                 await asyncio.sleep(10)  # Check more frequently
             
+            # Clean shutdown if we get here
+            logger.info("Shutting down bot gracefully...")
+            await application.stop()
+            await application.shutdown()
+            break
+            
+        except telegram.error.Conflict as e:
+            logger.error(f"Conflict error: {e}. Another instance is likely running.")
+            is_shutting_down = True
+            break
+            
         except Exception as e:
             logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
-            if attempt < max_retries - 1:
+            if attempt < max_retries - 1 and not is_shutting_down:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 1.5, 300)  # Exponential backoff, max 5 minutes
             else:
-                logger.error("Max retries reached. Restarting process...")
-                os._exit(1)  # Force restart by exiting process
+                logger.error("Max retries reached or shutdown requested. Exiting...")
+                break
+    
+    # Stop the keepalive server
+    keepalive_server.stop()
+    
+    if is_shutting_down:
+        logger.info("Process is shutting down.")
+    else:
+        logger.error("Bot failed to start after maximum retries.")
+
+# ================== SIGNAL HANDLERS ==================
+def handle_sigterm(signum, frame):
+    """Handle SIGTERM gracefully."""
+    global is_shutting_down
+    logger.info("Received SIGTERM signal. Initiating shutdown...")
+    is_shutting_down = True
 
 # ================== MAIN ENTRY POINT ==================
 def main():
     """Main entry point with reliability enhancements"""
     try:
+        import atexit
+        
+        # Register signal handlers
+        signal.signal(signal.SIGTERM, handle_sigterm)
+        signal.signal(signal.SIGINT, handle_sigterm)
+        
+        # Ensure we're the only instance running
+        ensure_single_instance()
+        
         # Add version and startup info
-        logger.info(f"Starting RMT Study Bot v1.0.3 - 24/7 Edition")
+        logger.info(f"Starting RMT Study Bot v1.0.4 - 24/7 Edition")
         logger.info(f"Current Date and Time: {datetime.datetime.now(MANILA_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
         logger.info(f"User: {CURRENT_USER}")
-        
-        # Start the health check server
-        start_keepalive_server()
-        logger.info(f"Health check server started with HEALTH_CHECK_PORT: {os.getenv('HEALTH_CHECK_PORT', os.getenv('PORT', 10001))}")
-        
-        time.sleep(5)  # Give the server time to start
-        
-        startup_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        logger.info(f"Bot starting at {startup_time}")
-        logger.info("Initializing bot application...")
+        logger.info(f"Process ID: {os.getpid()}")
         
         # Run the bot with retries
         asyncio.run(run_bot_with_retries())
+        
+        logger.info("Bot has shutdown gracefully.")
+        sys.exit(0)
         
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
