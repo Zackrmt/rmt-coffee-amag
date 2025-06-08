@@ -6,10 +6,12 @@ services:
     startCommand: cd src && python bot.py
     plan: free
     healthCheckPath: /health
+    healthCheckTimeout: 5
+    autoDeploy: false  # Disable auto-deploy for better stability
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: HEALTH_CHECK_PORT
+      - key: PORT
         value: 10001
       - key: TZ
         value: Asia/Manila
