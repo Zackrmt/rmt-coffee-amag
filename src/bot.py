@@ -29,21 +29,6 @@ from telegram.ext import (
 )
 from telegram.error import Conflict
 
-# Add this function to handle date parsing safely
-def ensure_datetime(date_value):
-    """Convert string dates to datetime objects safely."""
-    if isinstance(date_value, str):
-        try:
-            return datetime.datetime.fromisoformat(date_value)
-        except ValueError:
-            # Handle other string formats if needed
-            return datetime.datetime.strptime(date_value, '%Y-%m-%d %H:%M:%S')
-    elif isinstance(date_value, datetime.datetime):
-        return date_value
-    else:
-        # Default fallback
-        return datetime.datetime.now(MANILA_TZ)
-
 # For PDF generation
 from reportlab.lib.pagesizes import A4, A5, A6
 from reportlab.lib import colors
@@ -260,9 +245,9 @@ class GoogleDriveDB:
             self.local_backup[user_id] = data
             logger.warning(f"Saved data for user {user_id} to local backup only")
             return True  # Return True since we saved to local backup
-                
-    def _load_user_data_raw(self, user_id):
-        """Load raw user data from Google Drive or local backup without date parsing."""
+            
+    def load_user_data(self, user_id):
+        """Load user data from Google Drive or local backup."""
         # Try to load from local backup first for speed
         if user_id in self.local_backup:
             logger.info(f"Loaded data for user {user_id} from local backup")
@@ -298,35 +283,7 @@ class GoogleDriveDB:
         except Exception as e:
             logger.error(f"Error loading user data from Drive: {e}")
             return None
-    
-    def load_user_data(self, user_id):
-        """Load user data from storage with proper date parsing."""
-        data = self._load_user_data_raw(user_id)
-        
-        if data and 'sessions' in data:
-            # Convert date strings to datetime objects
-            for session in data['sessions']:
-                try:
-                    if isinstance(session['start_time'], str):
-                        session['start_time'] = datetime.datetime.fromisoformat(session['start_time'])
-                    
-                    if 'end_time' in session and session['end_time'] and isinstance(session['end_time'], str):
-                        session['end_time'] = datetime.datetime.fromisoformat(session['end_time'])
-                        
-                    # Also process break periods if they exist
-                    if 'break_periods' in session:
-                        for break_period in session['break_periods']:
-                            if isinstance(break_period['start'], str):
-                                break_period['start'] = datetime.datetime.fromisoformat(break_period['start'])
-                            if isinstance(break_period['end'], str):
-                                break_period['end'] = datetime.datetime.fromisoformat(break_period['end'])
-                except Exception as e:
-                    logger.error(f"Error parsing session dates: {e}")
-                    # Don't stop processing other sessions
-                    continue
-        
-        return data
-
+            
     def _get_file_id(self, file_name):
         """Get file ID by name."""
         query = f"name='{file_name}' and '{self.database_folder_id}' in parents and trashed=false"
@@ -2762,29 +2719,29 @@ class TelegramBot:
             )
             return CHOOSING_MAIN_MENU
 
-async def generate_today_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Generate and send today's study report as PDF."""
-    self.record_activity()
-    user = update.effective_user
-    user_id = user.id
-    user_name = user.first_name or user.username or "User"
-    
-    # Handle callback query if this was triggered by button
-    if update.callback_query:
-        query = update.callback_query
-        await query.answer()
+    async def generate_today_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Generate and send today's study report as PDF."""
+        self.record_activity()
         
-        # Check if we're in a topic/thread
-        if update.callback_query.message and update.callback_query.message.is_topic_message:
-            # Update the thread_id in user_data
-            context.user_data['thread_id'] = update.callback_query.message.message_thread_id
+        # Handle callback query if this was triggered by button
+        if update.callback_query:
+            query = update.callback_query
+            await query.answer()
+            
+            # Check if we're in a topic/thread
+            if update.callback_query.message and update.callback_query.message.is_topic_message:
+                # Update the thread_id in user_data
+                context.user_data['thread_id'] = update.callback_query.message.message_thread_id
+            
+            try:
+                # Don't delete the main menu message
+                if update.callback_query.message.text != "Welcome to RMT Study Bot! 📚✨":
+                    await query.message.delete()
+            except Exception as e:
+                logger.error(f"Error deleting message: {e}")
         
-        try:
-            # Don't delete the main menu message
-            if update.callback_query.message.text != "Welcome to RMT Study Bot! 📚✨":
-                await query.message.delete()
-        except Exception as e:
-            logger.error(f"Error deleting message: {e}")
+        user = update.effective_user
+        user_name = user.first_name or user.username or "User"
         
         await self.send_bot_message(
             context,
@@ -2792,90 +2749,39 @@ async def generate_today_report(self, update: Update, context: ContextTypes.DEFA
             "Generating your study report for today... Please wait...",
             should_delete=True
         )
-    else:
-        # If triggered by a direct command
-        await update.message.reply_text("Generating your study report for today... Please wait...")
-    
-    try:
-        # Get today's date in Manila timezone
-        today = datetime.now(MANILA_TZ).date()
         
-        # Get study sessions for today
-        today_sessions = self.db.get_sessions_for_date(user_id, today)
-        
-        # If no sessions found, try the alternative approach with user_data
-        if not today_sessions:
-            user_data = self.db.load_user_data(user_id)
-            if user_data and 'sessions' in user_data and user_data['sessions']:
-                # Filter sessions for today
-                today_sessions = []
-                for session in user_data['sessions']:
-                    # Convert start_time to datetime if it's a string
-                    if isinstance(session['start_time'], str):
-                        try:
-                            session['start_time'] = datetime.fromisoformat(session['start_time'])
-                        except ValueError:
-                            # Log the error and skip this session
-                            logger.error(f"Error parsing session start time: {session['start_time']}")
-                            continue
-                    
-                    # Convert end_time to datetime if it's a string and exists
-                    if 'end_time' in session and session['end_time'] and isinstance(session['end_time'], str):
-                        try:
-                            session['end_time'] = datetime.fromisoformat(session['end_time'])
-                        except ValueError:
-                            # Log the error but don't skip - just treat as ongoing
-                            logger.error(f"Error parsing session end time: {session['end_time']}")
-                            session['end_time'] = None
-                    
-                    # Check if this session occurred today (in Manila timezone)
-                    session_date = session['start_time'].astimezone(MANILA_TZ).date()
-                    if session_date == today:
-                        today_sessions.append(session)
-        
-        if not today_sessions:
-            message = "You don't have any study sessions recorded for today. Start studying to build your daily report!"
-            if update.callback_query:
+        try:
+            # Get today's date in Manila timezone
+            today = datetime.datetime.now(MANILA_TZ).date()
+            
+            # Get study sessions for today
+            today_sessions = self.db.get_sessions_for_date(user.id, today)
+            
+            if not today_sessions:
                 await self.send_bot_message(
                     context,
                     update.effective_chat.id,
-                    message,
+                    "You don't have any study sessions recorded for today. Start studying to build your daily report!",
                     should_delete=True
                 )
-            else:
-                await update.message.reply_text(message)
-            return CHOOSING_MAIN_MENU
-        
-        # Log for debugging
-        logger.info(f"Generating today report for user {user_id} with {len(today_sessions)} sessions")
-        
-        # Generate PDF
-        pdf_buffer = self.pdf_generator.generate_daily_report(user_name, today, today_sessions)
-        
-        # Prepare filename
-        filename = f"Daily Study Report {today.strftime('%Y-%m-%d')} - {user_name}, RMT.pdf"
-        
-        # Send the PDF file
-        if update.callback_query:
+                return CHOOSING_MAIN_MENU
+            
+            # Generate PDF
+            pdf_buffer = self.pdf_generator.generate_daily_report(user_name, today, today_sessions)
+            
+            # Send the PDF file
             await self.send_document(
                 context,
                 update.effective_chat.id,
                 pdf_buffer,
-                filename=filename,
+                filename=f"Daily Study Report {today.strftime('%Y-%m-%d')} - {user_name}, RMT.pdf",
                 caption=f"Here's your study report for today, {user_name}!"
             )
-        else:
-            await update.message.reply_document(
-                document=pdf_buffer,
-                filename=filename,
-                caption=f"Here's your study report for today, {user_name}!"
-            )
-        
-        # Show start studying button
-        buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
-        reply_markup = InlineKeyboardMarkup(buttons)
-        
-        if update.callback_query:
+            
+            # Show start studying button
+            buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
+            reply_markup = InlineKeyboardMarkup(buttons)
+            
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
@@ -2883,30 +2789,19 @@ async def generate_today_report(self, update: Update, context: ContextTypes.DEFA
                 reply_markup=reply_markup,
                 should_delete=True
             )
-        else:
-            await update.message.reply_text(
-                "Ready to start another study session?",
-                reply_markup=reply_markup
-            )
-        
-        return CHOOSING_MAIN_MENU
-        
-    except Exception as e:
-        logger.error(f"Error generating today's report: {e}", exc_info=True)
-        error_message = "Sorry, there was an error generating your daily report. Please try again later."
-        
-        if update.callback_query:
+            
+            return CHOOSING_MAIN_MENU
+            
+        except Exception as e:
+            logger.error(f"Error generating today's report: {e}")
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                error_message,
+                "Sorry, there was an error generating your daily report. Please try again later.",
                 should_delete=True
             )
-        else:
-            await update.message.reply_text(error_message)
-        
-        return CHOOSING_MAIN_MENU
-        
+            return CHOOSING_MAIN_MENU
+
     async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Show cancel confirmation dialog."""
         self.record_activity()
@@ -3091,7 +2986,7 @@ async def run_bot_with_retries():
             # Add command handlers
             application.add_handler(CommandHandler('start', telegram_bot.start))
             application.add_handler(CommandHandler('MYSTUDYdownload', telegram_bot.generate_overall_progress_report))
-            application.add_handler(CommandHandler('MYSTUDYtoday', telegram_bot.generate_day_report))
+            application.add_handler(CommandHandler('MYSTUDYtoday', telegram_bot.generate_today_report))
             application.add_handler(CommandHandler('reset_mydata', telegram_bot.reset_user_data))
             
             # Add reset data confirmation handlers
