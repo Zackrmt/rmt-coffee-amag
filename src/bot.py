@@ -1023,50 +1023,98 @@ class PDFReportGenerator:
             story.append(legend)
             story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
-        # Daily timeline - IMPORTANT: Add to a new page
+        # Daily timeline - IMPORTANT: Add to a new page with clear page break
         story.append(PageBreak())
-        timeline_title = Paragraph("Daily Timeline", self.styles['RMT_SectionHeader'])
+        timeline_title = Paragraph("Daily Timeline", self.styles['RMT_ReportTitle'])  # Use ReportTitle for prominence
         story.append(timeline_title)
+        story.append(Spacer(1, 0.3*inch))
         
+        # Create date for the report generation
+        report_date = datetime.now(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
+        report_info = Paragraph(f"Generated on: {report_date} | User: {user_name}", self.styles['RMT_BodyText'])
+        story.append(report_info)
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Create a more structured timeline with consistent table format (bank statement style)
+        all_timeline_data = [['Date', 'Subject', 'Start Time', 'End Time', 'Duration']]  # Header row
+        date_subtotals = {}
+
+        # First collect all session data in a structured format
         for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
-            date_title = Paragraph(f"{date.strftime('%Y-%m-%d')}", self.styles['RMT_BodyText'])
-            story.append(date_title)
-            
             day_total = sum(session['total_study_time'] for session in day_sessions)
-            day_stats = Paragraph(
-                f"Total study time: {self._format_time(day_total)}", 
-                self.styles['RMT_BodyText']
-            )
-            story.append(day_stats)
+            date_subtotals[date] = day_total
             
-            session_data = [['Subject', 'Start Time', 'End Time', 'Duration']]
-            
+            # Add each session as a row
             for session in sorted(day_sessions, key=lambda x: x['start_time']):
                 start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
                 end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
                 
-                session_data.append([
+                all_timeline_data.append([
+                    date.strftime('%Y-%m-%d'),
                     session['subject'],
                     start_time,
                     end_time,
                     self._format_time(session['total_study_time'])
                 ])
             
-            session_table = Table(session_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
-            session_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('BOX', (0, 0), (-1, -1), 1, colors.black),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ]))
+            # Add a subtotal row for this date with bold formatting
+            all_timeline_data.append([
+                f"<b>{date.strftime('%Y-%m-%d')} Total</b>",
+                "",
+                "",
+                "",
+                f"<b>{self._format_time(day_total)}</b>"
+            ])
             
-            story.append(session_table)
-            story.append(Spacer(1, 0.3*inch))
+            # Add a blank row for spacing between dates
+            all_timeline_data.append(["", "", "", "", ""])
+
+        # Remove the last blank row
+        if all_timeline_data[-1] == ["", "", "", "", ""]:
+            all_timeline_data.pop()
+
+        # Create the complete timeline table
+        timeline_table = Table(all_timeline_data, colWidths=[1.2*inch, 1.8*inch, 1.2*inch, 1.2*inch, 1.1*inch])
+
+        # Apply bank statement-like styling
+        row_styles = []
+        for i in range(len(all_timeline_data)):
+            if i == 0:  # Header row
+                row_styles.append(('BACKGROUND', (0, i), (-1, i), colors.darkblue))
+                row_styles.append(('TEXTCOLOR', (0, i), (-1, i), colors.white))
+                row_styles.append(('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'))
+                row_styles.append(('BOTTOMPADDING', (0, i), (-1, i), 10))
+                row_styles.append(('ALIGN', (0, i), (-1, i), 'CENTER'))
+            elif i < len(all_timeline_data) - 1 and all_timeline_data[i+1] == ["", "", "", "", ""]:
+                # This is a total row (right before a blank row)
+                row_styles.append(('BACKGROUND', (0, i), (-1, i), colors.lightgrey))
+                row_styles.append(('LINEABOVE', (0, i), (-1, i), 1, colors.grey))
+                row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))  # Right-align the total
+            elif all_timeline_data[i] != ["", "", "", "", ""]:
+                # Normal data row
+                if i % 2 == 1:  # Alternate row coloring for better readability
+                    row_styles.append(('BACKGROUND', (0, i), (-1, i), colors.whitesmoke))
+                row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))  # Right-align duration
+                row_styles.append(('ALIGN', (2, i), (3, i), 'CENTER'))  # Center-align times
+
+        # General table styling
+        timeline_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, 0), 1, colors.black),  # Grid for header only
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),  # Box around entire table
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            *row_styles
+        ]))
+
+        story.append(timeline_table)
+        story.append(Spacer(1, 0.3*inch))
+
+        # Add a grand total
+        grand_total = sum(date_subtotals.values())
+        total_text = Paragraph(f"<b>Grand Total: {self._format_time(grand_total)}</b>", self.styles['RMT_BodyText'])
+        story.append(total_text)
         
         # Subject detail pages - add each to a new page
         for subject in sorted(subject_times.keys()):
