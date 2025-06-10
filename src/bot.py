@@ -2749,7 +2749,7 @@ class TelegramBot:
             "Generating your study report for today... Please wait...",
             should_delete=True
         )
-        
+                
         try:
             # Get today's date in Manila timezone
             today = datetime.datetime.now(MANILA_TZ).date()
@@ -2757,7 +2757,15 @@ class TelegramBot:
             # Get study sessions for today
             today_sessions = self.db.get_sessions_for_date(user.id, today)
             
+            # Log sessions count for debugging
+            logger.info(f"Found {len(today_sessions)} sessions for user {user.id} on {today}")
+            
             if not today_sessions:
+                # Check if there are any sessions at all
+                all_sessions = self.db.get_user_study_sessions(user.id)
+                if all_sessions:
+                    logger.info(f"User has {len(all_sessions)} sessions in total, but none for today {today}")
+                    
                 await self.send_bot_message(
                     context,
                     update.effective_chat.id,
@@ -2765,7 +2773,7 @@ class TelegramBot:
                     should_delete=True
                 )
                 return CHOOSING_MAIN_MENU
-            
+        
             # Generate PDF
             pdf_buffer = self.pdf_generator.generate_daily_report(user_name, today, today_sessions)
             
