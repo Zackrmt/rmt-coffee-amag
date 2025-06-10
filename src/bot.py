@@ -7,8 +7,11 @@ import threading
 import time
 import signal
 import atexit
+import json
+import io
+import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, Set, List, Any
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -23,7 +26,22 @@ from telegram.ext import (
     PersistenceInput,
     PicklePersistence
 )
-from telegram.error import Conflict  # Add this import to fix the error
+from telegram.error import Conflict
+
+# For PDF generation
+from reportlab.lib.pagesizes import A4, A7
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.linecharts import HorizontalLineChart
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.lib.units import inch, cm
+
+# For Google Drive API
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
 
 # Configure logging
 logging.basicConfig(
@@ -53,6 +71,11 @@ PID_FILE = "/tmp/rmt_study_bot.pid"
 
 # Persistence path
 PERSISTENCE_PATH = "/tmp/rmt_study_bot.pickle"
+
+# Google Drive API Constants
+CREDENTIALS_FILE = "credentials.json"
+SCOPES = ['https://www.googleapis.com/auth/drive']
+DATABASE_FOLDER_NAME = "RMT_Study_Bot_Database"
 
 # Shared state
 class SharedState:
@@ -94,6 +117,552 @@ SUBJECTS = {
     "ANKI 🎟️": "ANKI",
     "Others🤓": "OTHERS"
 }
+
+# ================== GOOGLE DRIVE DATABASE ==================
+class GoogleDriveDB:
+    def __init__(self):
+        self.drive_service = None
+        self.database_folder_id = None
+        self.initialized = False
+        
+    def initialize(self):
+        """Initialize Google Drive API client."""
+        try:
+            credentials = service_account.Credentials.from_service_account_file(
+                CREDENTIALS_FILE, scopes=SCOPES)
+            self.drive_service = build('drive', 'v3', credentials=credentials)
+            
+            # Create or find the database folder
+            self.database_folder_id = self._get_or_create_folder(DATABASE_FOLDER_NAME)
+            
+            self.initialized = True
+            logger.info("Google Drive database initialized successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize Google Drive database: {e}")
+            return False
+            
+    def _get_or_create_folder(self, folder_name):
+        """Get or create a folder in Google Drive."""
+        # Check if folder already exists
+        query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        results = self.drive_service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+        folders = results.get('files', [])
+        
+        # Return existing folder if found
+        if folders:
+            logger.info(f"Found existing folder: {folder_name}")
+            return folders[0]['id']
+        
+        # Create new folder
+        folder_metadata = {
+            'name': folder_name,
+            'mimeType': 'application/vnd.google-apps.folder'
+        }
+        folder = self.drive_service.files().create(
+            body=folder_metadata, fields='id').execute()
+        logger.info(f"Created new folder: {folder_name}")
+        return folder.get('id')
+        
+    def save_user_data(self, user_id, data):
+        """Save user data to Google Drive."""
+        if not self.initialized:
+            if not self.initialize():
+                return False
+                
+        try:
+            # Convert data to JSON string
+            json_data = json.dumps(data, default=self._json_serializer)
+            
+            # Check if file already exists
+            file_name = f"user_{user_id}_data.json"
+            file_id = self._get_file_id(file_name)
+            
+            # Create file media
+            media = MediaIoBaseUpload(
+                io.BytesIO(json_data.encode()),
+                mimetype='application/json',
+                resumable=True
+            )
+            
+            if file_id:
+                # Update existing file
+                self.drive_service.files().update(
+                    fileId=file_id,
+                    media_body=media
+                ).execute()
+                logger.info(f"Updated data for user {user_id}")
+            else:
+                # Create new file
+                file_metadata = {
+                    'name': file_name,
+                    'parents': [self.database_folder_id]
+                }
+                self.drive_service.files().create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields='id'
+                ).execute()
+                logger.info(f"Created new data file for user {user_id}")
+                
+            return True
+        except Exception as e:
+            logger.error(f"Error saving user data: {e}")
+            return False
+            
+    def load_user_data(self, user_id):
+        """Load user data from Google Drive."""
+        if not self.initialized:
+            if not self.initialize():
+                return None
+                
+        try:
+            file_name = f"user_{user_id}_data.json"
+            file_id = self._get_file_id(file_name)
+            
+            if not file_id:
+                logger.info(f"No data found for user {user_id}")
+                return None
+                
+            # Get file content
+            file_content = self.drive_service.files().get_media(fileId=file_id).execute()
+            
+            # Parse JSON
+            if isinstance(file_content, bytes):
+                data = json.loads(file_content.decode())
+            else:
+                data = json.loads(file_content)
+                
+            logger.info(f"Loaded data for user {user_id}")
+            return data
+        except Exception as e:
+            logger.error(f"Error loading user data: {e}")
+            return None
+            
+    def _get_file_id(self, file_name):
+        """Get file ID by name."""
+        query = f"name='{file_name}' and '{self.database_folder_id}' in parents and trashed=false"
+        results = self.drive_service.files().list(
+            q=query, spaces='drive', fields='files(id, name)').execute()
+        files = results.get('files', [])
+        
+        if files:
+            return files[0]['id']
+        return None
+        
+    def _json_serializer(self, obj):
+        """Custom JSON serializer for objects not serializable by default json code."""
+        if isinstance(obj, (datetime.datetime, datetime.date)):
+            return obj.isoformat()
+        if hasattr(obj, '__dict__'):
+            return obj.__dict__
+        raise TypeError(f"Type {type(obj)} not serializable")
+
+    def save_study_session(self, user_id, user_name, study_session):
+        """Save study session to the user's session history."""
+        if not self.initialized:
+            if not self.initialize():
+                return False
+                
+        try:
+            # Get existing data or create new
+            data = self.load_user_data(user_id) or {'user_name': user_name, 'sessions': []}
+            
+            # Convert StudySession to serializable dict
+            session_dict = {
+                'user_id': study_session.user_id,
+                'subject': study_session.subject,
+                'goal_time': study_session.goal_time,
+                'start_time': study_session.start_time.isoformat(),
+                'end_time': study_session.end_time.isoformat() if study_session.end_time else None,
+                'break_periods': [
+                    {
+                        'start': period['start'].isoformat(),
+                        'end': period['end'].isoformat()
+                    } 
+                    for period in study_session.break_periods
+                ],
+                'total_study_time': study_session.get_total_study_time().total_seconds(),
+                'total_break_time': study_session.get_total_break_time().total_seconds(),
+                'study_break_ratio': study_session.get_study_break_ratio(),
+                'progress_percentage': study_session.get_progress_percentage()
+            }
+            
+            # Add to sessions list
+            data['sessions'].append(session_dict)
+            
+            # Save back to Drive
+            return self.save_user_data(user_id, data)
+            
+        except Exception as e:
+            logger.error(f"Error saving study session: {e}")
+            return False
+
+    def get_user_study_sessions(self, user_id):
+        """Get all study sessions for a user."""
+        if not self.initialized:
+            if not self.initialize():
+                return []
+                
+        try:
+            data = self.load_user_data(user_id)
+            if not data or 'sessions' not in data:
+                return []
+                
+            sessions = data['sessions']
+            
+            # Convert ISO dates to datetime objects
+            for session in sessions:
+                session['start_time'] = datetime.datetime.fromisoformat(session['start_time'])
+                if session['end_time']:
+                    session['end_time'] = datetime.datetime.fromisoformat(session['end_time'])
+                
+                for break_period in session['break_periods']:
+                    break_period['start'] = datetime.datetime.fromisoformat(break_period['start'])
+                    break_period['end'] = datetime.datetime.fromisoformat(break_period['end'])
+                    
+            return sessions
+        except Exception as e:
+            logger.error(f"Error getting user study sessions: {e}")
+            return []
+
+    def get_sessions_for_date(self, user_id, date):
+        """Get study sessions for a specific date."""
+        all_sessions = self.get_user_study_sessions(user_id)
+        
+        # Filter sessions for the specific date
+        date_sessions = []
+        for session in all_sessions:
+            session_date = session['start_time'].date()
+            if session_date == date:
+                date_sessions.append(session)
+                
+        return date_sessions
+
+# ================== PDF REPORT GENERATOR ==================
+class PDFReportGenerator:
+    def __init__(self):
+        self.styles = getSampleStyleSheet()
+        # Create custom styles
+        self.styles.add(ParagraphStyle(
+            name='Title',
+            parent=self.styles['Heading1'],
+            fontSize=16,
+            alignment=1,  # Center
+            spaceAfter=12
+        ))
+        self.styles.add(ParagraphStyle(
+            name='Subtitle',
+            parent=self.styles['Heading2'],
+            fontSize=14,
+            alignment=1,
+            spaceAfter=10
+        ))
+        self.styles.add(ParagraphStyle(
+            name='Normal',
+            parent=self.styles['Normal'],
+            fontSize=10,
+            spaceAfter=6
+        ))
+        self.styles.add(ParagraphStyle(
+            name='TableHeader',
+            parent=self.styles['Normal'],
+            fontSize=10,
+            alignment=1,
+            textColor=colors.white,
+            backColor=colors.darkblue
+        ))
+        
+    def _format_time(self, seconds):
+        """Format seconds into hours and minutes."""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        return f"{hours}h {minutes}m"
+        
+    def generate_daily_report(self, user_name, date, sessions):
+        """Generate a PDF report for a specific day."""
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A7)
+        story = []
+        
+        # Title
+        title = Paragraph(f"Daily Study Report", self.styles['Title'])
+        story.append(title)
+        
+        # User and Date
+        user_date = Paragraph(f"{user_name}, RMT<br/>{date.strftime('%Y-%m-%d')}", self.styles['Subtitle'])
+        story.append(user_date)
+        story.append(Spacer(1, 0.2*inch))
+        
+        if not sessions:
+            no_data = Paragraph("No study sessions recorded for this date.", self.styles['Normal'])
+            story.append(no_data)
+        else:
+            # Summary statistics
+            total_study_time = sum(session['total_study_time'] for session in sessions)
+            total_break_time = sum(session['total_break_time'] for session in sessions)
+            
+            study_time_para = Paragraph(f"Total Study Time: {self._format_time(total_study_time)}", self.styles['Normal'])
+            story.append(study_time_para)
+            
+            break_time_para = Paragraph(f"Total Break Time: {self._format_time(total_break_time)}", self.styles['Normal'])
+            story.append(break_time_para)
+            
+            ratio = "N/A"
+            if total_break_time > 0:
+                study_minutes = int(total_study_time / 60)
+                break_minutes = int(total_break_time / 60)
+                
+                def gcd(a, b):
+                    while b:
+                        a, b = b, a % b
+                    return a
+                
+                divisor = gcd(study_minutes, break_minutes)
+                if divisor > 0:
+                    ratio = f"{study_minutes//divisor}:{break_minutes//divisor}"
+            
+            ratio_para = Paragraph(f"Study:Break Ratio: {ratio}", self.styles['Normal'])
+            story.append(ratio_para)
+            story.append(Spacer(1, 0.2*inch))
+            
+            # Sessions table
+            table_data = [['Subject', 'Time']]
+            
+            for session in sessions:
+                subject = session['subject']
+                study_time = self._format_time(session['total_study_time'])
+                table_data.append([subject, study_time])
+            
+            table = Table(table_data, colWidths=[1.2*inch, 0.8*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            
+            story.append(table)
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        return buffer
+        
+    def generate_full_report(self, user_name, sessions):
+        """Generate a comprehensive PDF report of all study sessions."""
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        story = []
+        
+        # Title
+        title = Paragraph(f"Study Progress Report of {user_name}, RMT", self.styles['Title'])
+        story.append(title)
+        story.append(Spacer(1, 0.5*inch))
+        
+        if not sessions:
+            no_data = Paragraph("No study sessions recorded yet.", self.styles['Normal'])
+            story.append(no_data)
+            doc.build(story)
+            buffer.seek(0)
+            return buffer
+        
+        # Sort sessions by date
+        sessions.sort(key=lambda x: x['start_time'])
+        
+        # Group sessions by date
+        sessions_by_date = {}
+        for session in sessions:
+            date_key = session['start_time'].date()
+            if date_key not in sessions_by_date:
+                sessions_by_date[date_key] = []
+            sessions_by_date[date_key].append(session)
+        
+        # Add overall statistics
+        total_study_time = sum(session['total_study_time'] for session in sessions)
+        total_days = len(sessions_by_date)
+        
+        stats_para = Paragraph(
+            f"Total Study Time: {self._format_time(total_study_time)}<br/>"
+            f"Days Studied: {total_days}<br/>"
+            f"Average Study Time per Day: {self._format_time(total_study_time / max(1, total_days))}", 
+            self.styles['Normal']
+        )
+        story.append(stats_para)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Daily study time chart
+        daily_chart_title = Paragraph("Daily Study Time", self.styles['Subtitle'])
+        story.append(daily_chart_title)
+        
+        daily_data = []
+        daily_labels = []
+        
+        for date, day_sessions in sorted(sessions_by_date.items()):
+            day_total = sum(session['total_study_time'] for session in day_sessions) / 3600  # Convert to hours
+            daily_data.append(day_total)
+            daily_labels.append(date.strftime("%m/%d"))
+        
+        drawing = Drawing(400, 200)
+        bc = VerticalBarChart()
+        bc.x = 50
+        bc.y = 50
+        bc.height = 125
+        bc.width = 300
+        bc.data = [daily_data]
+        bc.strokeColor = colors.black
+        
+        bc.valueAxis.valueMin = 0
+        bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
+        bc.valueAxis.valueStep = 1
+        bc.categoryAxis.labels.boxAnchor = 'ne'
+        bc.categoryAxis.labels.dx = 8
+        bc.categoryAxis.labels.dy = -2
+        bc.categoryAxis.labels.angle = 30
+        bc.categoryAxis.categoryNames = daily_labels
+        
+        drawing.add(bc)
+        story.append(drawing)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Subject breakdown
+        subject_title = Paragraph("Subject Breakdown", self.styles['Subtitle'])
+        story.append(subject_title)
+        
+        # Group study time by subject
+        subject_times = {}
+        for session in sessions:
+            subject = session['subject']
+            if subject not in subject_times:
+                subject_times[subject] = 0
+            subject_times[subject] += session['total_study_time']
+        
+        # Create table for subject breakdown
+        subject_data = [['Subject', 'Total Time', 'Percentage']]
+        
+        for subject, time in sorted(subject_times.items(), key=lambda x: x[1], reverse=True):
+            percentage = (time / total_study_time) * 100
+            subject_data.append([
+                subject, 
+                self._format_time(time), 
+                f"{percentage:.1f}%"
+            ])
+        
+        subject_table = Table(subject_data, colWidths=[2*inch, 1.5*inch, 1*inch])
+        subject_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ]))
+        
+        story.append(subject_table)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Daily timeline
+        timeline_title = Paragraph("Daily Timeline", self.styles['Subtitle'])
+        story.append(timeline_title)
+        
+        for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
+            date_title = Paragraph(f"{date.strftime('%Y-%m-%d')}", self.styles['Normal'])
+            story.append(date_title)
+            
+            day_total = sum(session['total_study_time'] for session in day_sessions)
+            day_stats = Paragraph(
+                f"Total study time: {self._format_time(day_total)}", 
+                self.styles['Normal']
+            )
+            story.append(day_stats)
+            
+            session_data = [['Subject', 'Start Time', 'End Time', 'Duration']]
+            
+            for session in sorted(day_sessions, key=lambda x: x['start_time']):
+                start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                
+                session_data.append([
+                    session['subject'],
+                    start_time,
+                    end_time,
+                    self._format_time(session['total_study_time'])
+                ])
+            
+            session_table = Table(session_data, colWidths=[1.25*inch, 1.25*inch, 1.25*inch, 1.25*inch])
+            session_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            
+            story.append(session_table)
+            story.append(Spacer(1, 0.2*inch))
+        
+        # Subject detail pages
+        for subject in sorted(subject_times.keys()):
+            story.append(PageBreak())
+            
+            subject_page_title = Paragraph(f"Subject: {subject}", self.styles['Title'])
+            story.append(subject_page_title)
+            story.append(Spacer(1, 0.3*inch))
+            
+            subject_total = subject_times[subject]
+            subject_sessions = [s for s in sessions if s['subject'] == subject]
+            subject_percentage = (subject_total / total_study_time) * 100
+            
+            subject_summary = Paragraph(
+                f"Total Time: {self._format_time(subject_total)}<br/>"
+                f"Percentage of Total Study Time: {subject_percentage:.1f}%<br/>"
+                f"Number of Sessions: {len(subject_sessions)}", 
+                self.styles['Normal']
+            )
+            story.append(subject_summary)
+            story.append(Spacer(1, 0.3*inch))
+            
+            # Sessions for this subject
+            sessions_title = Paragraph("Sessions", self.styles['Subtitle'])
+            story.append(sessions_title)
+            
+            if subject_sessions:
+                subject_session_data = [['Date', 'Start Time', 'End Time', 'Duration']]
+                
+                for session in sorted(subject_sessions, key=lambda x: x['start_time'], reverse=True):
+                    date = session['start_time'].astimezone(MANILA_TZ).strftime('%Y-%m-%d')
+                    start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                    end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                    
+                    subject_session_data.append([
+                        date,
+                        start_time,
+                        end_time,
+                        self._format_time(session['total_study_time'])
+                    ])
+                
+                subject_session_table = Table(subject_session_data, colWidths=[1.25*inch, 1.25*inch, 1.25*inch, 1.25*inch])
+                subject_session_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ]))
+                
+                story.append(subject_session_table)
+            else:
+                no_sessions = Paragraph("No sessions recorded for this subject.", self.styles['Normal'])
+                story.append(no_sessions)
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        return buffer
 
 # ================== SINGLE INSTANCE CHECK ==================
 def ensure_single_instance():
@@ -491,6 +1060,11 @@ class TelegramBot:
         self.last_activity = datetime.datetime.now()
         self.start_command_handlers: Set[int] = set()  # Track users who have already triggered /start
         self.application = None
+        self.db = GoogleDriveDB()
+        self.pdf_generator = PDFReportGenerator()
+        
+        # Initialize Google Drive DB
+        self.db.initialize()
 
     async def cleanup_all_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clean up ALL messages including those marked to keep."""
@@ -591,7 +1165,9 @@ class TelegramBot:
             context.user_data['thread_id'] = update.message.message_thread_id
         
         buttons = [
-            [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')]
+            [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
+            [InlineKeyboardButton("MY OVERALL PROGRESS 📊", callback_data='overall_progress')],
+            [InlineKeyboardButton("STUDY REPORT TODAY 📋", callback_data='today_report')]
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
         
@@ -887,8 +1463,8 @@ class TelegramBot:
         
         return STUDYING
 
-    async def handle_break(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle break start/end."""
+    async def end_break(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """End the break and continue studying."""
         self.record_activity()
         query = update.callback_query
         await query.answer()
@@ -909,47 +1485,25 @@ class TelegramBot:
             )
             return await self.start(update, context)
 
-        if query.data == 'start_break':
-            session.start_break()
-            buttons = [
-                [
-                    InlineKeyboardButton("End Break ▶️", callback_data='end_break'),
-                    InlineKeyboardButton("End Session ⏹️", callback_data='end_session')
-                ],
-                [InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')]
-            ]
-            reply_markup = InlineKeyboardMarkup(buttons)
-            
-            break_start_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
-            await self.send_bot_message(
-                context,
-                update.effective_chat.id,
-                f"☕ Break started at {break_start_time.strftime('%I:%M %p')}",
-                reply_markup=reply_markup,
-                should_delete=False
-            )
-            return ON_BREAK
-                
-        elif query.data == 'end_break':
-            session.end_break()
-            buttons = [
-                [
-                    InlineKeyboardButton("Take a Break ☕", callback_data='start_break'),
-                    InlineKeyboardButton("End Session ⏹️", callback_data='end_session')
-                ],
-                [InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')]
-            ]
-            reply_markup = InlineKeyboardMarkup(buttons)
-            
-            break_end_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
-            await self.send_bot_message(
-                context,
-                update.effective_chat.id,
-                f"▶️ Break ended at {break_end_time.strftime('%I:%M %p')}\nBack to studying!",
-                reply_markup=reply_markup,
-                should_delete=False
-            )
-            return STUDYING
+        session.end_break()
+        buttons = [
+            [
+                InlineKeyboardButton("Take a Break ☕", callback_data='start_break'),
+                InlineKeyboardButton("End Session ⏹️", callback_data='end_session')
+            ],
+            [InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')]
+        ]
+        reply_markup = InlineKeyboardMarkup(buttons)
+        
+        break_end_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            f"▶️ Break ended at {break_end_time.strftime('%I:%M %p')}\nBack to studying!",
+            reply_markup=reply_markup,
+            should_delete=False
+        )
+        return STUDYING
 
     async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """End the study session and show summary."""
@@ -1039,6 +1593,10 @@ class TelegramBot:
                 should_delete=True
             )
 
+            # Save completed session to database
+            user_name = user.first_name or user.username or "User"
+            self.db.save_study_session(user.id, user_name, session)
+
             buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
             reply_markup = InlineKeyboardMarkup(buttons)
             
@@ -1121,6 +1679,131 @@ class TelegramBot:
         else:
             return context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
 
+    async def generate_overall_progress_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Generate and send overall progress report as PDF."""
+        self.record_activity()
+        
+        # Handle callback query if this was triggered by button
+        if update.callback_query:
+            query = update.callback_query
+            await query.answer()
+            try:
+                # Don't delete the main menu message
+                if update.callback_query.message.text != "Welcome to RMT Study Bot! 📚✨":
+                    await query.message.delete()
+            except Exception as e:
+                logger.error(f"Error deleting message: {e}")
+        
+        user = update.effective_user
+        user_name = user.first_name or user.username or "User"
+        
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            "Generating your overall study progress report... 📊",
+            should_delete=True
+        )
+        
+        try:
+            # Get all study sessions for this user
+            all_sessions = self.db.get_user_study_sessions(user.id)
+            
+            if not all_sessions:
+                await self.send_bot_message(
+                    context,
+                    update.effective_chat.id,
+                    "You don't have any study sessions recorded yet. Start studying to build your progress report!",
+                    should_delete=True
+                )
+                return CHOOSING_MAIN_MENU
+            
+            # Generate PDF
+            pdf_buffer = self.pdf_generator.generate_full_report(user_name, all_sessions)
+            
+            # Send the PDF file
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=pdf_buffer,
+                filename=f"Study Progress Report of {user_name}, RMT.pdf",
+                caption=f"📊 Here's your complete study progress report, {user_name}!"
+            )
+            
+            return CHOOSING_MAIN_MENU
+            
+        except Exception as e:
+            logger.error(f"Error generating overall progress report: {e}")
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Sorry, there was an error generating your progress report. Please try again later.",
+                should_delete=True
+            )
+            return CHOOSING_MAIN_MENU
+
+    async def generate_today_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Generate and send today's study report as PDF."""
+        self.record_activity()
+        
+        # Handle callback query if this was triggered by button
+        if update.callback_query:
+            query = update.callback_query
+            await query.answer()
+            try:
+                # Don't delete the main menu message
+                if update.callback_query.message.text != "Welcome to RMT Study Bot! 📚✨":
+                    await query.message.delete()
+            except Exception as e:
+                logger.error(f"Error deleting message: {e}")
+        
+        user = update.effective_user
+        user_name = user.first_name or user.username or "User"
+        
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            "Generating your study report for today... 📋",
+            should_delete=True
+        )
+        
+        try:
+            # Get today's date in Manila timezone
+            today = datetime.datetime.now(MANILA_TZ).date()
+            
+            # Get study sessions for today
+            today_sessions = self.db.get_sessions_for_date(user.id, today)
+            
+            if not today_sessions:
+                await self.send_bot_message(
+                    context,
+                    update.effective_chat.id,
+                    "You don't have any study sessions recorded for today. Start studying to build your daily report!",
+                    should_delete=True
+                )
+                return CHOOSING_MAIN_MENU
+            
+            # Generate PDF
+            pdf_buffer = self.pdf_generator.generate_daily_report(user_name, today, today_sessions)
+            
+            # Send the PDF file
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=pdf_buffer,
+                filename=f"Daily Study Report {today.strftime('%Y-%m-%d')} - {user_name}, RMT.pdf",
+                caption=f"📋 Here's your study report for today, {user_name}!"
+            )
+            
+            return CHOOSING_MAIN_MENU
+            
+        except Exception as e:
+            logger.error(f"Error generating today's report: {e}")
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Sorry, there was an error generating your daily report. Please try again later.",
+                should_delete=True
+            )
+            return CHOOSING_MAIN_MENU
+
 # ================== ERROR HANDLER ==================
 async def error_handler(update, context):
     """Handle errors in the telegram bot."""
@@ -1201,18 +1884,26 @@ async def run_bot_with_retries():
             # Store in shared state
             shared_state.telegram_bot = telegram_bot
             
-            # Add start command handler
+            # Add command handlers
             application.add_handler(CommandHandler('start', telegram_bot.start))
+            application.add_handler(CommandHandler('MYSTUDYdownload', telegram_bot.generate_overall_progress_report))
+            application.add_handler(CommandHandler('MYSTUDYtoday', telegram_bot.generate_today_report))
             
             conv_handler = ConversationHandler(
-                entry_points=[CallbackQueryHandler(telegram_bot.ask_goal, pattern='^start_studying$')],
+                entry_points=[
+                    CallbackQueryHandler(telegram_bot.ask_goal, pattern='^start_studying$'),
+                    CallbackQueryHandler(telegram_bot.generate_overall_progress_report, pattern='^overall_progress$'),
+                    CallbackQueryHandler(telegram_bot.generate_today_report, pattern='^today_report$')
+                ],
                 states={
                     CONFIRMING_CANCEL: [
                         CallbackQueryHandler(telegram_bot.handle_cancel_confirmation, pattern='^confirm_cancel$'),
                         CallbackQueryHandler(telegram_bot.handle_cancel_confirmation, pattern='^reject_cancel$')
                     ],
                     CHOOSING_MAIN_MENU: [
-                        CallbackQueryHandler(telegram_bot.ask_goal, pattern='^start_studying$')
+                        CallbackQueryHandler(telegram_bot.ask_goal, pattern='^start_studying$'),
+                        CallbackQueryHandler(telegram_bot.generate_overall_progress_report, pattern='^overall_progress$'),
+                        CallbackQueryHandler(telegram_bot.generate_today_report, pattern='^today_report$')
                     ],
                     SETTING_GOAL: [
                         CallbackQueryHandler(telegram_bot.handle_goal_selection, pattern='^goal_'),
@@ -1360,7 +2051,7 @@ def main():
             logger.error(f"Error in single instance check: {e}")
         
         # Add version and startup info
-        logger.info(f"Starting RMT Study Bot v1.1.0 - 24/7 Edition with Persistence")
+        logger.info(f"Starting RMT Study Bot v1.2.0 - 24/7 Edition with Google Drive Persistence")
         logger.info(f"Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"Current User's Login: {CURRENT_USER}")
         logger.info(f"Process ID: {os.getpid()}")
