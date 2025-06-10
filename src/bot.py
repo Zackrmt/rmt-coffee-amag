@@ -345,14 +345,14 @@ class PDFReportGenerator:
         self.styles = getSampleStyleSheet()
         # Create custom styles
         self.styles.add(ParagraphStyle(
-            name='Title',
+            name='ReportTitle',
             parent=self.styles['Heading1'],
             fontSize=16,
             alignment=1,  # Center
             spaceAfter=12
         ))
         self.styles.add(ParagraphStyle(
-            name='Subtitle',
+            name='ReportSubtitle',
             parent=self.styles['Heading2'],
             fontSize=14,
             alignment=1,
@@ -386,6 +386,63 @@ class PDFReportGenerator:
         minutes = int((seconds % 3600) // 60)
         return f"{hours}h {minutes}m"
         
+    def generate_session_report(self, user_name, session):
+        """Generate a PDF report for a single study session."""
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A7)
+        story = []
+        
+        # Title
+        title = Paragraph(f"Study Session Report", self.styles['ReportTitle'])
+        story.append(title)
+        
+        # User
+        user_subtitle = Paragraph(f"{user_name}, RMT", self.styles['ReportSubtitle'])
+        story.append(user_subtitle)
+        
+        # Session details
+        subject = Paragraph(f"Subject: {session['subject']}", self.styles['Normal'])
+        story.append(subject)
+        
+        # Format times for display
+        start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
+        end_time = session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p') if session['end_time'] else "Ongoing"
+        
+        times = Paragraph(f"Started: {start_time}<br/>Ended: {end_time}", self.styles['Normal'])
+        story.append(times)
+        
+        study_time = Paragraph(f"Study Time: {self._format_time(session['total_study_time'])}", self.styles['Normal'])
+        story.append(study_time)
+        
+        break_time = Paragraph(f"Break Time: {self._format_time(session['total_break_time'])}", self.styles['Normal'])
+        story.append(break_time)
+        
+        if 'goal_time' in session and session['goal_time']:
+            progress = Paragraph(f"Goal Progress: {session['progress_percentage']}%", self.styles['Normal'])
+            story.append(progress)
+        
+        # Break details if any
+        if session['break_periods']:
+            story.append(Spacer(1, 0.2*inch))
+            breaks_title = Paragraph("Break Details:", self.styles['Normal'])
+            story.append(breaks_title)
+            
+            for i, break_period in enumerate(session['break_periods']):
+                break_start = break_period['start'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                break_end = break_period['end'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                break_detail = Paragraph(f"Break {i+1}: {break_start} - {break_end}", self.styles['Normal'])
+                story.append(break_detail)
+        
+        # Add creator footer
+        story.append(Spacer(1, 0.3*inch))
+        footer = Paragraph("© Study tracker created by Eli.", self.styles['Footer'])
+        story.append(footer)
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        return buffer
+        
     def generate_daily_report(self, user_name, date, sessions):
         """Generate a PDF report for a specific day."""
         buffer = io.BytesIO()
@@ -393,11 +450,11 @@ class PDFReportGenerator:
         story = []
         
         # Title
-        title = Paragraph(f"Daily Study Report", self.styles['Title'])
+        title = Paragraph(f"Daily Study Report", self.styles['ReportTitle'])
         story.append(title)
         
         # User and Date
-        user_date = Paragraph(f"{user_name}, RMT<br/>{date.strftime('%Y-%m-%d')}", self.styles['Subtitle'])
+        user_date = Paragraph(f"{user_name}, RMT<br/>{date.strftime('%Y-%m-%d')}", self.styles['ReportSubtitle'])
         story.append(user_date)
         story.append(Spacer(1, 0.2*inch))
         
@@ -470,7 +527,7 @@ class PDFReportGenerator:
         story = []
         
         # Title
-        title = Paragraph(f"Study Progress Report of {user_name}, RMT", self.styles['Title'])
+        title = Paragraph(f"Study Progress Report of {user_name}, RMT", self.styles['ReportTitle'])
         story.append(title)
         story.append(Spacer(1, 0.5*inch))
         
@@ -512,7 +569,7 @@ class PDFReportGenerator:
         story.append(Spacer(1, 0.3*inch))
         
         # Daily study time chart
-        daily_chart_title = Paragraph("Daily Study Time", self.styles['Subtitle'])
+        daily_chart_title = Paragraph("Daily Study Time", self.styles['ReportSubtitle'])
         story.append(daily_chart_title)
         
         daily_data = []
@@ -546,7 +603,7 @@ class PDFReportGenerator:
         story.append(Spacer(1, 0.3*inch))
         
         # Subject breakdown
-        subject_title = Paragraph("Subject Breakdown", self.styles['Subtitle'])
+        subject_title = Paragraph("Subject Breakdown", self.styles['ReportSubtitle'])
         story.append(subject_title)
         
         # Group study time by subject
@@ -582,7 +639,7 @@ class PDFReportGenerator:
         story.append(Spacer(1, 0.3*inch))
         
         # Daily timeline
-        timeline_title = Paragraph("Daily Timeline", self.styles['Subtitle'])
+        timeline_title = Paragraph("Daily Timeline", self.styles['ReportSubtitle'])
         story.append(timeline_title)
         
         for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
@@ -626,7 +683,7 @@ class PDFReportGenerator:
         for subject in sorted(subject_times.keys()):
             story.append(PageBreak())
             
-            subject_page_title = Paragraph(f"Subject: {subject}", self.styles['Title'])
+            subject_page_title = Paragraph(f"Subject: {subject}", self.styles['ReportTitle'])
             story.append(subject_page_title)
             story.append(Spacer(1, 0.3*inch))
             
@@ -644,7 +701,7 @@ class PDFReportGenerator:
             story.append(Spacer(1, 0.3*inch))
             
             # Sessions for this subject
-            sessions_title = Paragraph("Sessions", self.styles['Subtitle'])
+            sessions_title = Paragraph("Sessions", self.styles['ReportSubtitle'])
             story.append(sessions_title)
             
             if subject_sessions:
@@ -687,219 +744,6 @@ class PDFReportGenerator:
             story.append(Spacer(1, 0.5*inch))
             footer = Paragraph("© Study tracker created by Eli.", self.styles['Footer'])
             story.append(footer)
-        
-        # Build PDF
-        doc.build(story)
-        buffer.seek(0)
-        return buffer
-    
-    def generate_full_report(self, user_name, sessions):
-        """Generate a comprehensive PDF report of all study sessions."""
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        story = []
-        
-        # Title
-        title = Paragraph(f"Study Progress Report of {user_name}, RMT", self.styles['Title'])
-        story.append(title)
-        story.append(Spacer(1, 0.5*inch))
-        
-        if not sessions:
-            no_data = Paragraph("No study sessions recorded yet.", self.styles['Normal'])
-            story.append(no_data)
-            doc.build(story)
-            buffer.seek(0)
-            return buffer
-        
-        # Sort sessions by date
-        sessions.sort(key=lambda x: x['start_time'])
-        
-        # Group sessions by date
-        sessions_by_date = {}
-        for session in sessions:
-            date_key = session['start_time'].date()
-            if date_key not in sessions_by_date:
-                sessions_by_date[date_key] = []
-            sessions_by_date[date_key].append(session)
-        
-        # Add overall statistics
-        total_study_time = sum(session['total_study_time'] for session in sessions)
-        total_days = len(sessions_by_date)
-        
-        stats_para = Paragraph(
-            f"Total Study Time: {self._format_time(total_study_time)}<br/>"
-            f"Days Studied: {total_days}<br/>"
-            f"Average Study Time per Day: {self._format_time(total_study_time / max(1, total_days))}", 
-            self.styles['Normal']
-        )
-        story.append(stats_para)
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Daily study time chart
-        daily_chart_title = Paragraph("Daily Study Time", self.styles['Subtitle'])
-        story.append(daily_chart_title)
-        
-        daily_data = []
-        daily_labels = []
-        
-        for date, day_sessions in sorted(sessions_by_date.items()):
-            day_total = sum(session['total_study_time'] for session in day_sessions) / 3600  # Convert to hours
-            daily_data.append(day_total)
-            daily_labels.append(date.strftime("%m/%d"))
-        
-        drawing = Drawing(400, 200)
-        bc = VerticalBarChart()
-        bc.x = 50
-        bc.y = 50
-        bc.height = 125
-        bc.width = 300
-        bc.data = [daily_data]
-        bc.strokeColor = colors.black
-        
-        bc.valueAxis.valueMin = 0
-        bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
-        bc.valueAxis.valueStep = 1
-        bc.categoryAxis.labels.boxAnchor = 'ne'
-        bc.categoryAxis.labels.dx = 8
-        bc.categoryAxis.labels.dy = -2
-        bc.categoryAxis.labels.angle = 30
-        bc.categoryAxis.categoryNames = daily_labels
-        
-        drawing.add(bc)
-        story.append(drawing)
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Subject breakdown
-        subject_title = Paragraph("Subject Breakdown", self.styles['Subtitle'])
-        story.append(subject_title)
-        
-        # Group study time by subject
-        subject_times = {}
-        for session in sessions:
-            subject = session['subject']
-            if subject not in subject_times:
-                subject_times[subject] = 0
-            subject_times[subject] += session['total_study_time']
-        
-        # Create table for subject breakdown
-        subject_data = [['Subject', 'Total Time', 'Percentage']]
-        
-        for subject, time in sorted(subject_times.items(), key=lambda x: x[1], reverse=True):
-            percentage = (time / total_study_time) * 100
-            subject_data.append([
-                subject, 
-                self._format_time(time), 
-                f"{percentage:.1f}%"
-            ])
-        
-        subject_table = Table(subject_data, colWidths=[2*inch, 1.5*inch, 1*inch])
-        subject_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ]))
-        
-        story.append(subject_table)
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Daily timeline
-        timeline_title = Paragraph("Daily Timeline", self.styles['Subtitle'])
-        story.append(timeline_title)
-        
-        for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
-            date_title = Paragraph(f"{date.strftime('%Y-%m-%d')}", self.styles['Normal'])
-            story.append(date_title)
-            
-            day_total = sum(session['total_study_time'] for session in day_sessions)
-            day_stats = Paragraph(
-                f"Total study time: {self._format_time(day_total)}", 
-                self.styles['Normal']
-            )
-            story.append(day_stats)
-            
-            session_data = [['Subject', 'Start Time', 'End Time', 'Duration']]
-            
-            for session in sorted(day_sessions, key=lambda x: x['start_time']):
-                start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                
-                session_data.append([
-                    session['subject'],
-                    start_time,
-                    end_time,
-                    self._format_time(session['total_study_time'])
-                ])
-            
-            session_table = Table(session_data, colWidths=[1.25*inch, 1.25*inch, 1.25*inch, 1.25*inch])
-            session_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ]))
-            
-            story.append(session_table)
-            story.append(Spacer(1, 0.2*inch))
-        
-        # Subject detail pages
-        for subject in sorted(subject_times.keys()):
-            story.append(PageBreak())
-            
-            subject_page_title = Paragraph(f"Subject: {subject}", self.styles['Title'])
-            story.append(subject_page_title)
-            story.append(Spacer(1, 0.3*inch))
-            
-            subject_total = subject_times[subject]
-            subject_sessions = [s for s in sessions if s['subject'] == subject]
-            subject_percentage = (subject_total / total_study_time) * 100
-            
-            subject_summary = Paragraph(
-                f"Total Time: {self._format_time(subject_total)}<br/>"
-                f"Percentage of Total Study Time: {subject_percentage:.1f}%<br/>"
-                f"Number of Sessions: {len(subject_sessions)}", 
-                self.styles['Normal']
-            )
-            story.append(subject_summary)
-            story.append(Spacer(1, 0.3*inch))
-            
-            # Sessions for this subject
-            sessions_title = Paragraph("Sessions", self.styles['Subtitle'])
-            story.append(sessions_title)
-            
-            if subject_sessions:
-                subject_session_data = [['Date', 'Start Time', 'End Time', 'Duration']]
-                
-                for session in sorted(subject_sessions, key=lambda x: x['start_time'], reverse=True):
-                    date = session['start_time'].astimezone(MANILA_TZ).strftime('%Y-%m-%d')
-                    start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                    end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                    
-                    subject_session_data.append([
-                        date,
-                        start_time,
-                        end_time,
-                        self._format_time(session['total_study_time'])
-                    ])
-                
-                subject_session_table = Table(subject_session_data, colWidths=[1.25*inch, 1.25*inch, 1.25*inch, 1.25*inch])
-                subject_session_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                ]))
-                
-                story.append(subject_session_table)
-            else:
-                no_sessions = Paragraph("No sessions recorded for this subject.", self.styles['Normal'])
-                story.append(no_sessions)
         
         # Build PDF
         doc.build(story)
@@ -1284,6 +1128,21 @@ class StudySession:
             })
             
         return times
+        
+    def to_dict(self):
+        """Convert session to a dictionary for storage."""
+        return {
+            'user_id': self.user_id,
+            'subject': self.subject,
+            'goal_time': self.goal_time,
+            'start_time': self.start_time,
+            'end_time': self.end_time,
+            'break_periods': self.break_periods,
+            'total_study_time': self.get_total_study_time().total_seconds(),
+            'total_break_time': self.get_total_break_time().total_seconds(),
+            'study_break_ratio': self.get_study_break_ratio(),
+            'progress_percentage': self.get_progress_percentage()
+        }
 
 # ================== PENDING SESSION CLASS ==================
 class PendingSession:
@@ -1705,8 +1564,8 @@ class TelegramBot:
         
         return STUDYING
 
-    async def end_break(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """End the break and continue studying."""
+    async def handle_break(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle break start/end."""
         self.record_activity()
         query = update.callback_query
         await query.answer()
@@ -1727,25 +1586,47 @@ class TelegramBot:
             )
             return await self.start(update, context)
 
-        session.end_break()
-        buttons = [
-            [
-                InlineKeyboardButton("Take a Break ☕", callback_data='start_break'),
-                InlineKeyboardButton("End Session ⏹️", callback_data='end_session')
-            ],
-            [InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')]
-        ]
-        reply_markup = InlineKeyboardMarkup(buttons)
-        
-        break_end_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
-        await self.send_bot_message(
-            context,
-            update.effective_chat.id,
-            f"▶️ Break ended at {break_end_time.strftime('%I:%M %p')}\nBack to studying!",
-            reply_markup=reply_markup,
-            should_delete=False
-        )
-        return STUDYING
+        if query.data == 'start_break':
+            session.start_break()
+            buttons = [
+                [
+                    InlineKeyboardButton("End Break ▶️", callback_data='end_break'),
+                    InlineKeyboardButton("End Session ⏹️", callback_data='end_session')
+                ],
+                [InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')]
+            ]
+            reply_markup = InlineKeyboardMarkup(buttons)
+            
+            break_start_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                f"☕ Break started at {break_start_time.strftime('%I:%M %p')}",
+                reply_markup=reply_markup,
+                should_delete=False
+            )
+            return ON_BREAK
+                
+        elif query.data == 'end_break':
+            session.end_break()
+            buttons = [
+                [
+                    InlineKeyboardButton("Take a Break ☕", callback_data='start_break'),
+                    InlineKeyboardButton("End Session ⏹️", callback_data='end_session')
+                ],
+                [InlineKeyboardButton("Cancel ⬅️", callback_data='cancel_operation')]
+            ]
+            reply_markup = InlineKeyboardMarkup(buttons)
+            
+            break_end_time = datetime.datetime.now(PST_TZ).astimezone(MANILA_TZ)
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                f"▶️ Break ended at {break_end_time.strftime('%I:%M %p')}\nBack to studying!",
+                reply_markup=reply_markup,
+                should_delete=False
+            )
+            return STUDYING
 
     async def end_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """End the study session and show summary."""
@@ -1838,7 +1719,29 @@ class TelegramBot:
             # Save completed session to database
             user_name = user.first_name or user.username or "User"
             self.db.save_study_session(user.id, user_name, session)
-
+            
+            # Store the session dictionary for PDF generation
+            session_dict = session.to_dict()
+            context.user_data['last_session'] = session_dict
+            
+            # Add buttons to download study reports
+            buttons = [
+                [
+                    InlineKeyboardButton("THIS SESSION", callback_data='report_session'),
+                    InlineKeyboardButton("THIS DAY", callback_data='report_day'),
+                    InlineKeyboardButton("OVERALL", callback_data='report_overall')
+                ]
+            ]
+            report_markup = InlineKeyboardMarkup(buttons)
+            
+            report_msg = await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Would you like to check your progress report in PDF?",
+                reply_markup=report_markup,
+                should_delete=True
+            )
+            
             buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
             reply_markup = InlineKeyboardMarkup(buttons)
             
@@ -1860,43 +1763,8 @@ class TelegramBot:
         del self.study_sessions[user.id]
         return CHOOSING_MAIN_MENU
 
-    async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Show cancel confirmation dialog."""
-        self.record_activity()
-        query = update.callback_query
-        if query:
-            await query.answer()
-            
-            try:
-                await query.message.delete()
-            except Exception as e:
-                logger.error(f"Error deleting message: {e}")
-
-        buttons = [
-            [
-                InlineKeyboardButton("Yes ✅", callback_data='confirm_cancel'),
-                InlineKeyboardButton("No ❌", callback_data='reject_cancel')
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(buttons)
-        
-        message_id = await self.send_bot_message(
-            context,
-            update.effective_chat.id,
-            "Are you sure you want to cancel?",
-            reply_markup=reply_markup,
-            should_delete=True
-        )
-        
-        # Update pending session for this user
-        user_id = update.effective_user.id
-        if user_id in self.pending_sessions:
-            self.pending_sessions[user_id].message_ids.append(message_id)
-        
-        return CONFIRMING_CANCEL
-
-    async def handle_cancel_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Handle the cancel confirmation response."""
+    async def generate_session_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Generate and send PDF report for the last completed session."""
         self.record_activity()
         query = update.callback_query
         await query.answer()
@@ -1905,21 +1773,110 @@ class TelegramBot:
             await query.message.delete()
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
+        
+        user = update.effective_user
+        user_name = user.first_name or user.username or "User"
+        
+        # Get the last session from context
+        last_session = context.user_data.get('last_session')
+        
+        if not last_session:
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Sorry, I couldn't find your last session data.",
+                should_delete=True
+            )
+            return CHOOSING_MAIN_MENU
+        
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            "Generating your session report... 📊",
+            should_delete=True
+        )
+        
+        try:
+            # Generate PDF
+            pdf_buffer = self.pdf_generator.generate_session_report(user_name, last_session)
+            
+            # Send the PDF file
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=pdf_buffer,
+                filename=f"Session Report - {user_name}, RMT.pdf",
+                caption=f"📊 Here's your session report, {user_name}!"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error generating session report: {e}")
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Sorry, there was an error generating your session report.",
+                should_delete=True
+            )
+            
+        return CHOOSING_MAIN_MENU
 
-        if query.data == 'confirm_cancel':
-            user = update.effective_user
-            if user.id in self.study_sessions:
-                del self.study_sessions[user.id]
+    async def generate_day_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Generate and send PDF report for today's sessions."""
+        self.record_activity()
+        query = update.callback_query
+        await query.answer()
+        
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.error(f"Error deleting message: {e}")
+        
+        user = update.effective_user
+        user_name = user.first_name or user.username or "User"
+        
+        # Get today's date
+        today = datetime.datetime.now(MANILA_TZ).date()
+        
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            "Generating your daily study report... 📊",
+            should_delete=True
+        )
+        
+        try:
+            # Get today's sessions
+            today_sessions = self.db.get_sessions_for_date(user.id, today)
             
-            # Also remove from pending sessions
-            if user.id in self.pending_sessions:
-                del self.pending_sessions[user.id]
+            if not today_sessions:
+                await self.send_bot_message(
+                    context,
+                    update.effective_chat.id,
+                    "No study sessions found for today.",
+                    should_delete=True
+                )
+                return CHOOSING_MAIN_MENU
             
-            await self.cleanup_messages(update, context)
-            return await self.start(update, context)
+            # Generate PDF
+            pdf_buffer = self.pdf_generator.generate_daily_report(user_name, today, today_sessions)
             
-        else:
-            return context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
+            # Send the PDF file
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=pdf_buffer,
+                filename=f"Daily Study Report {today.strftime('%Y-%m-%d')} - {user_name}, RMT.pdf",
+                caption=f"📊 Here's your daily study report, {user_name}!"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error generating day report: {e}")
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Sorry, there was an error generating your daily report.",
+                should_delete=True
+            )
+            
+        return CHOOSING_MAIN_MENU
 
     async def generate_overall_progress_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Generate and send overall progress report as PDF."""
@@ -2046,6 +2003,67 @@ class TelegramBot:
             )
             return CHOOSING_MAIN_MENU
 
+    async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Show cancel confirmation dialog."""
+        self.record_activity()
+        query = update.callback_query
+        if query:
+            await query.answer()
+            
+            try:
+                await query.message.delete()
+            except Exception as e:
+                logger.error(f"Error deleting message: {e}")
+
+        buttons = [
+            [
+                InlineKeyboardButton("Yes ✅", callback_data='confirm_cancel'),
+                InlineKeyboardButton("No ❌", callback_data='reject_cancel')
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(buttons)
+        
+        message_id = await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            "Are you sure you want to cancel?",
+            reply_markup=reply_markup,
+            should_delete=True
+        )
+        
+        # Update pending session for this user
+        user_id = update.effective_user.id
+        if user_id in self.pending_sessions:
+            self.pending_sessions[user_id].message_ids.append(message_id)
+        
+        return CONFIRMING_CANCEL
+
+    async def handle_cancel_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Handle the cancel confirmation response."""
+        self.record_activity()
+        query = update.callback_query
+        await query.answer()
+        
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.error(f"Error deleting message: {e}")
+
+        if query.data == 'confirm_cancel':
+            user = update.effective_user
+            if user.id in self.study_sessions:
+                del self.study_sessions[user.id]
+            
+            # Also remove from pending sessions
+            if user.id in self.pending_sessions:
+                del self.pending_sessions[user.id]
+            
+            await self.cleanup_messages(update, context)
+            return await self.start(update, context)
+            
+        else:
+            return context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
+
 # ================== ERROR HANDLER ==================
 async def error_handler(update, context):
     """Handle errors in the telegram bot."""
@@ -2103,8 +2121,7 @@ async def run_bot_with_retries():
                         chat_data=True,
                         user_data=True,
                         bot_data=True,
-                        callback_data=True,  # Important for buttons to work after restart
-                        conversation=True    # Keep conversation state
+                        callback_data=True  # Important for buttons to work after restart
                     ),
                     update_interval=60,  # Save every 60 seconds
                 )
@@ -2135,7 +2152,10 @@ async def run_bot_with_retries():
                 entry_points=[
                     CallbackQueryHandler(telegram_bot.ask_goal, pattern='^start_studying$'),
                     CallbackQueryHandler(telegram_bot.generate_overall_progress_report, pattern='^overall_progress$'),
-                    CallbackQueryHandler(telegram_bot.generate_today_report, pattern='^today_report$')
+                    CallbackQueryHandler(telegram_bot.generate_today_report, pattern='^today_report$'),
+                    CallbackQueryHandler(telegram_bot.generate_session_report, pattern='^report_session$'),
+                    CallbackQueryHandler(telegram_bot.generate_day_report, pattern='^report_day$'),
+                    CallbackQueryHandler(telegram_bot.generate_overall_progress_report, pattern='^report_overall$')
                 ],
                 states={
                     CONFIRMING_CANCEL: [
@@ -2145,7 +2165,10 @@ async def run_bot_with_retries():
                     CHOOSING_MAIN_MENU: [
                         CallbackQueryHandler(telegram_bot.ask_goal, pattern='^start_studying$'),
                         CallbackQueryHandler(telegram_bot.generate_overall_progress_report, pattern='^overall_progress$'),
-                        CallbackQueryHandler(telegram_bot.generate_today_report, pattern='^today_report$')
+                        CallbackQueryHandler(telegram_bot.generate_today_report, pattern='^today_report$'),
+                        CallbackQueryHandler(telegram_bot.generate_session_report, pattern='^report_session$'),
+                        CallbackQueryHandler(telegram_bot.generate_day_report, pattern='^report_day$'),
+                        CallbackQueryHandler(telegram_bot.generate_overall_progress_report, pattern='^report_overall$')
                     ],
                     SETTING_GOAL: [
                         CallbackQueryHandler(telegram_bot.handle_goal_selection, pattern='^goal_'),
