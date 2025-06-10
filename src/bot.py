@@ -548,8 +548,8 @@ class PDFReportGenerator:
             # Create pie chart for study vs break time
             drawing = Drawing(3*inch, 1.8*inch)  # Increased height
             pie = Pie()
-            pie.x = 1.5*inch
-            pie.y = 0.9*inch  # Adjusted y position for better centering
+            pie.x = 2.75*inch
+            pie.y = 0.2*inch  # Adjusted y position for better centering
             pie.width = 1.5*inch
             pie.height = 1.5*inch
             
@@ -865,8 +865,8 @@ class PDFReportGenerator:
         if total_study_time > 0 or total_break_time > 0:
             drawing = Drawing(5*inch, 3*inch)  # Increased height
             pie = Pie()
-            pie.x = 2.5*inch
-            pie.y = 1.5*inch  # Adjusted y position
+            pie.x = 2.75*inch
+            pie.y = 1*inch  # Adjusted y position
             pie.width = 2.5*inch
             pie.height = 2.5*inch
             pie.data = [total_study_time, total_break_time]
@@ -975,8 +975,8 @@ class PDFReportGenerator:
             
             drawing = Drawing(500, 300)  # Increased height
             pie = Pie()
-            pie.x = 250
-            pie.y = 150  # Adjusted y position
+            pie.x = 150
+            pie.y = 70  # Adjusted y position
             pie.width = 250
             pie.height = 250
             
