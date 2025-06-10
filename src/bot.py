@@ -380,9 +380,25 @@ class GoogleDriveDB:
         return date_sessions
 
 # ================== PDF REPORT GENERATOR ==================
+# ================== PDF REPORT GENERATOR ==================
 class PDFReportGenerator:
     def __init__(self):
         self.styles = getSampleStyleSheet()
+        
+        # Define pastel color palette
+        self.pastel_colors = {
+            'primary': colors.Color(0.6, 0.8, 0.9),        # Pastel blue
+            'secondary': colors.Color(0.9, 0.8, 0.6),      # Pastel orange/tan
+            'accent1': colors.Color(0.8, 0.9, 0.8),        # Pastel green
+            'accent2': colors.Color(0.9, 0.8, 0.9),        # Pastel purple
+            'accent3': colors.Color(0.9, 0.9, 0.7),        # Pastel yellow
+            'accent4': colors.Color(0.8, 0.7, 0.9),        # Pastel lavender
+            'accent5': colors.Color(0.7, 0.9, 0.9),        # Pastel cyan
+            'text': colors.Color(0.2, 0.3, 0.4),           # Dark blue-gray
+            'contrast': colors.Color(0.95, 0.95, 0.95),    # Light gray
+            'chart1': colors.Color(0.7, 0.8, 0.9),         # Light blue
+            'chart2': colors.Color(0.9, 0.7, 0.7)          # Light pink
+        }
         
         # Create custom styles with professional appearance and UNIQUE names
         self.styles.add(ParagraphStyle(
@@ -392,7 +408,7 @@ class PDFReportGenerator:
             alignment=1,  # Center
             spaceAfter=12,
             fontName='Helvetica-Bold',
-            textColor=colors.darkblue
+            textColor=self.pastel_colors['text']
         ))
         
         self.styles.add(ParagraphStyle(
@@ -402,7 +418,7 @@ class PDFReportGenerator:
             alignment=1,
             spaceAfter=10,
             fontName='Helvetica-Bold',
-            textColor=colors.navy
+            textColor=self.pastel_colors['text']
         ))
         
         self.styles.add(ParagraphStyle(
@@ -437,7 +453,7 @@ class PDFReportGenerator:
             fontSize=10,
             alignment=1,
             textColor=colors.white,
-            backColor=colors.darkblue,
+            backColor=self.pastel_colors['primary'],
             fontName='Helvetica-Bold'
         ))
         
@@ -446,10 +462,20 @@ class PDFReportGenerator:
             parent=self.styles['Heading3'],
             fontSize=12,
             fontName='Helvetica-Bold',
-            textColor=colors.navy,
+            textColor=self.pastel_colors['text'],
             spaceAfter=6,
             spaceBefore=12
         ))
+    
+    def _remove_emojis(self, subject):
+        """Remove emojis from subject names."""
+        # Remove anything that looks like an emoji (characters between spaces and non-alphanumeric)
+        import re
+        # Find emoji-like patterns (non-alphanumeric characters at the end)
+        clean_subject = re.sub(r'\s+[^\w\s]+$', '', subject)
+        # Also clean any at the beginning
+        clean_subject = re.sub(r'^[^\w\s]+\s+', '', clean_subject)
+        return clean_subject.strip()
         
     def _format_time(self, seconds):
         """Format seconds into hours and minutes."""
@@ -464,6 +490,9 @@ class PDFReportGenerator:
         doc = SimpleDocTemplate(buffer, pagesize=A6)
         story = []
         
+        # Clean subject name by removing emojis
+        clean_subject = self._remove_emojis(session['subject'])
+        
         # Title
         title = Paragraph(f"Study Session Report", self.styles['RMT_ReportTitle'])
         story.append(title)
@@ -474,7 +503,7 @@ class PDFReportGenerator:
         story.append(Spacer(1, 0.2*inch))
         
         # Session details
-        subject = Paragraph(f"Subject: {session['subject']}", self.styles['RMT_BodyText'])
+        subject = Paragraph(f"Subject: {clean_subject}", self.styles['RMT_BodyText'])
         story.append(subject)
         
         # Format times for display
@@ -496,7 +525,7 @@ class PDFReportGenerator:
         
         stats_table = Table(stats_data, colWidths=[1.5*inch, 1.5*inch])
         stats_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -527,7 +556,7 @@ class PDFReportGenerator:
             
             break_table = Table(break_data, colWidths=[0.3*inch, 1.0*inch, 1.0*inch, 0.7*inch])
             break_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -560,15 +589,15 @@ class PDFReportGenerator:
                 pie.data = [study_time, break_time]
                 pie.labels = ['Study', 'Break']
                 pie.slices.strokeWidth = 0.5
-                pie.slices[0].fillColor = colors.darkblue
-                pie.slices[1].fillColor = colors.lightblue
+                pie.slices[0].fillColor = self.pastel_colors['chart1']
+                pie.slices[1].fillColor = self.pastel_colors['chart2']
                 drawing.add(pie)
                 story.append(drawing)
                 
-                # Add legend
+                # Add legend with pastel colors
                 legend = Paragraph(
-                    f"<font color='darkblue'>■</font> Study: {self._format_time(study_time)} ({100*study_time/(study_time+break_time):.1f}%)<br/>"
-                    f"<font color='lightblue'>■</font> Break: {self._format_time(break_time)} ({100*break_time/(study_time+break_time):.1f}%)",
+                    f"<font color='{self._rgb_to_hex(self.pastel_colors['chart1'])}'>■</font> Study: {self._format_time(study_time)} ({100*study_time/(study_time+break_time):.1f}%)<br/>"
+                    f"<font color='{self._rgb_to_hex(self.pastel_colors['chart2'])}'>■</font> Break: {self._format_time(break_time)} ({100*break_time/(study_time+break_time):.1f}%)",
                     self.styles['RMT_SmallText']
                 )
                 story.append(legend)
@@ -583,6 +612,14 @@ class PDFReportGenerator:
         doc.build(story)
         buffer.seek(0)
         return buffer
+    
+    def _rgb_to_hex(self, color_obj):
+        """Convert a reportlab color to hex string for HTML."""
+        return '#{:02x}{:02x}{:02x}'.format(
+            int(color_obj.red * 255), 
+            int(color_obj.green * 255), 
+            int(color_obj.blue * 255)
+        )
         
     def generate_daily_report(self, user_name, date, sessions):
         """Generate a PDF report for a specific day."""
@@ -604,6 +641,10 @@ class PDFReportGenerator:
             no_data = Paragraph("No study sessions recorded for this date.", self.styles['RMT_BodyText'])
             story.append(no_data)
         else:
+            # Clean subject names by removing emojis
+            for session in sessions:
+                session['subject'] = self._remove_emojis(session['subject'])
+                
             # Summary statistics
             total_study_time = sum(session['total_study_time'] for session in sessions)
             total_break_time = sum(session['total_break_time'] for session in sessions)
@@ -636,7 +677,7 @@ class PDFReportGenerator:
             
             stats_table = Table(stats_data, colWidths=[2*inch, 2*inch])
             stats_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -669,17 +710,17 @@ class PDFReportGenerator:
                 pie.data = [total_study_time, total_break_time]
                 pie.labels = ['Study', 'Break']
                 pie.slices.strokeWidth = 0.5
-                pie.slices[0].fillColor = colors.darkblue
-                pie.slices[1].fillColor = colors.lightblue
+                pie.slices[0].fillColor = self.pastel_colors['chart1']
+                pie.slices[1].fillColor = self.pastel_colors['chart2']
                 drawing.add(pie)
                 story.append(drawing)
                 
-                # Add legend
+                # Add legend with pastel colors
                 total_time = total_study_time + total_break_time
                 if total_time > 0:
                     legend = Paragraph(
-                        f"<font color='darkblue'>■</font> Study: {self._format_time(total_study_time)} ({100*total_study_time/total_time:.1f}%)<br/>"
-                        f"<font color='lightblue'>■</font> Break: {self._format_time(total_break_time)} ({100*total_break_time/total_time:.1f}%)",
+                        f"<font color='{self._rgb_to_hex(self.pastel_colors['chart1'])}'>■</font> Study: {self._format_time(total_study_time)} ({100*total_study_time/total_time:.1f}%)<br/>"
+                        f"<font color='{self._rgb_to_hex(self.pastel_colors['chart2'])}'>■</font> Break: {self._format_time(total_break_time)} ({100*total_break_time/total_time:.1f}%)",
                         self.styles['RMT_BodyText']
                     )
                     story.append(legend)
@@ -713,7 +754,7 @@ class PDFReportGenerator:
                 
                 subject_table = Table(subject_data, colWidths=[2*inch, 1*inch, 1*inch])
                 subject_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                    ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                     ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -747,7 +788,7 @@ class PDFReportGenerator:
             
             session_table = Table(session_data, colWidths=[1*inch, 1*inch, 1*inch, 1*inch])
             session_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -792,6 +833,10 @@ class PDFReportGenerator:
             doc.build(story)
             buffer.seek(0)
             return buffer
+        
+        # Clean subject names by removing emojis
+        for session in sessions:
+            session['subject'] = self._remove_emojis(session['subject'])
         
         # Sort sessions by date
         sessions.sort(key=lambda x: x['start_time'])
@@ -844,7 +889,7 @@ class PDFReportGenerator:
         
         stats_table = Table(stats_data, colWidths=[2.5*inch, 2.5*inch])
         stats_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -870,84 +915,76 @@ class PDFReportGenerator:
         story.append(report_info)
         story.append(Spacer(1, 0.2*inch))
         
-        # Create a more structured timeline with consistent table format (bank statement style)
-        all_timeline_data = [['Date', 'Subject', 'Start Time', 'End Time', 'Duration']]  # Header row
-        date_subtotals = {}
-
-        # First collect all session data in a structured format
+        # Create a grouped timeline by date - NEW IMPLEMENTATION
+        # We'll create a table for each date
         for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
-            day_total = sum(session['total_study_time'] for session in day_sessions)
-            date_subtotals[date] = day_total
+            # Date header
+            date_header = Paragraph(f"<b>{date.strftime('%Y-%m-%d')}</b>", self.styles['RMT_SectionHeader'])
+            story.append(date_header)
             
-            # Add each session as a row
+            # Create session table for this date
+            session_data = [['Subject', 'Start Time', 'End Time', 'Duration']]  # Header row
+            
+            # Add session rows
             for session in sorted(day_sessions, key=lambda x: x['start_time']):
                 start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
                 end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
                 
-                all_timeline_data.append([
-                    date.strftime('%Y-%m-%d'),
+                session_data.append([
                     session['subject'],
                     start_time,
                     end_time,
                     self._format_time(session['total_study_time'])
                 ])
             
-            # Add a subtotal row for this date with bold formatting
-            all_timeline_data.append([
-                f"<b>{date.strftime('%Y-%m-%d')} Total</b>",
-                "",
+            # Calculate day total
+            day_total = sum(session['total_study_time'] for session in day_sessions)
+            
+            # Add total row
+            session_data.append([
+                "<b>Total</b>",
                 "",
                 "",
                 f"<b>{self._format_time(day_total)}</b>"
             ])
             
-            # Add a blank row for spacing between dates
-            all_timeline_data.append(["", "", "", "", ""])
-
-        # Remove the last blank row
-        if all_timeline_data[-1] == ["", "", "", "", ""]:
-            all_timeline_data.pop()
-
-        # Create the complete timeline table
-        timeline_table = Table(all_timeline_data, colWidths=[1.2*inch, 1.8*inch, 1.2*inch, 1.2*inch, 1.1*inch])
-
-        # Apply bank statement-like styling
-        row_styles = []
-        for i in range(len(all_timeline_data)):
-            if i == 0:  # Header row
-                row_styles.append(('BACKGROUND', (0, i), (-1, i), colors.darkblue))
-                row_styles.append(('TEXTCOLOR', (0, i), (-1, i), colors.white))
-                row_styles.append(('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'))
-                row_styles.append(('BOTTOMPADDING', (0, i), (-1, i), 10))
-                row_styles.append(('ALIGN', (0, i), (-1, i), 'CENTER'))
-            elif i < len(all_timeline_data) - 1 and all_timeline_data[i+1] == ["", "", "", "", ""]:
-                # This is a total row (right before a blank row)
-                row_styles.append(('BACKGROUND', (0, i), (-1, i), colors.lightgrey))
-                row_styles.append(('LINEABOVE', (0, i), (-1, i), 1, colors.grey))
-                row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))  # Right-align the total
-            elif all_timeline_data[i] != ["", "", "", "", ""]:
-                # Normal data row
-                if i % 2 == 1:  # Alternate row coloring for better readability
-                    row_styles.append(('BACKGROUND', (0, i), (-1, i), colors.whitesmoke))
-                row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))  # Right-align duration
-                row_styles.append(('ALIGN', (2, i), (3, i), 'CENTER'))  # Center-align times
-
-        # General table styling
-        timeline_table.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('GRID', (0, 0), (-1, 0), 1, colors.black),  # Grid for header only
-            ('BOX', (0, 0), (-1, -1), 1, colors.black),  # Box around entire table
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            *row_styles
-        ]))
-
-        story.append(timeline_table)
-        story.append(Spacer(1, 0.3*inch))
-
+            # Create and style the table
+            date_table = Table(session_data, colWidths=[2*inch, 1.3*inch, 1.3*inch, 1.2*inch])
+            
+            # Apply styling
+            row_styles = []
+            for i in range(len(session_data)):
+                if i == 0:  # Header row
+                    row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['primary']))
+                    row_styles.append(('TEXTCOLOR', (0, i), (-1, i), colors.white))
+                    row_styles.append(('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'))
+                    row_styles.append(('ALIGN', (0, i), (-1, i), 'CENTER'))
+                elif i == len(session_data) - 1:  # Total row
+                    row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['accent1']))
+                    row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))
+                else:  # Data rows
+                    if i % 2 == 1:  # Alternate row coloring
+                        row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['contrast']))
+                    row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))  # Right-align duration
+                    row_styles.append(('ALIGN', (1, i), (2, i), 'CENTER'))  # Center-align times
+            
+            # General table styling
+            date_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BOX', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                *row_styles
+            ]))
+            
+            story.append(date_table)
+            story.append(Spacer(1, 0.3*inch))  # Add space between date sections
+        
         # Add a grand total
-        grand_total = sum(date_subtotals.values())
+        grand_total = sum(sum(session['total_study_time'] for session in day_sessions) 
+                         for day_sessions in sessions_by_date.values())
         total_text = Paragraph(f"<b>Grand Total: {self._format_time(grand_total)}</b>", self.styles['RMT_BodyText'])
         story.append(total_text)
         
@@ -966,17 +1003,17 @@ class PDFReportGenerator:
             pie.data = [total_study_time, total_break_time]
             pie.labels = ['Study', 'Break']
             pie.slices.strokeWidth = 0.5
-            pie.slices[0].fillColor = colors.darkblue
-            pie.slices[1].fillColor = colors.lightblue
+            pie.slices[0].fillColor = self.pastel_colors['chart1']
+            pie.slices[1].fillColor = self.pastel_colors['chart2']
             drawing.add(pie)
             story.append(drawing)
             
-            # Add legend
+            # Add legend with pastel colors
             total_time = total_study_time + total_break_time
             if total_time > 0:
                 legend = Paragraph(
-                    f"<font color='darkblue'>■</font> Study: {self._format_time(total_study_time)} ({100*total_study_time/total_time:.1f}%)<br/>"
-                    f"<font color='lightblue'>■</font> Break: {self._format_time(total_break_time)} ({100*total_break_time/total_time:.1f}%)",
+                    f"<font color='{self._rgb_to_hex(self.pastel_colors['chart1'])}'>■</font> Study: {self._format_time(total_study_time)} ({100*total_study_time/total_time:.1f}%)<br/>"
+                    f"<font color='{self._rgb_to_hex(self.pastel_colors['chart2'])}'>■</font> Break: {self._format_time(total_break_time)} ({100*total_break_time/total_time:.1f}%)",
                     self.styles['RMT_BodyText']
                 )
                 story.append(legend)
@@ -1005,7 +1042,7 @@ class PDFReportGenerator:
         bc.width = 400
         bc.data = [daily_data]
         bc.strokeColor = colors.black
-        bc.fillColor = colors.darkblue
+        bc.fillColor = self.pastel_colors['primary']
         
         bc.valueAxis.valueMin = 0
         bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
@@ -1047,7 +1084,7 @@ class PDFReportGenerator:
         
         subject_table = Table(subject_data, colWidths=[2.5*inch, 2*inch, 1.5*inch])
         subject_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -1095,9 +1132,15 @@ class PDFReportGenerator:
             pie.labels = data_labels
             pie.slices.strokeWidth = 0.5
             
-            # Set a palette of colors
-            colors_palette = [colors.darkblue, colors.blue, colors.lightblue, 
-                             colors.navy, colors.royalblue, colors.skyblue]
+            # Set a palette of pastel colors
+            colors_palette = [
+                self.pastel_colors['primary'],
+                self.pastel_colors['secondary'],
+                self.pastel_colors['accent1'],
+                self.pastel_colors['accent2'],
+                self.pastel_colors['accent3'],
+                self.pastel_colors['accent4']
+            ]
             
             for i in range(len(data_values)):
                 pie.slices[i].fillColor = colors_palette[i % len(colors_palette)]
@@ -1108,16 +1151,12 @@ class PDFReportGenerator:
             # Add extra spacing for the legend to ensure it's well below the chart
             story.append(Spacer(1, 0.3*inch))
             
-            # Add legend
+            # Add legend with pastel colors
             legend_text = ""
             for i, (subject, time) in enumerate(zip(data_labels, data_values)):
                 color = colors_palette[i % len(colors_palette)]
                 percentage = (time / total_study_time) * 100 if total_study_time > 0 else 0
-                hex_color = '#{:02x}{:02x}{:02x}'.format(
-                    int(color.red * 255), 
-                    int(color.green * 255), 
-                    int(color.blue * 255)
-                )
+                hex_color = self._rgb_to_hex(color)
                 legend_text += f"<font color='{hex_color}'>■</font> {subject}: {self._format_time(time)} ({percentage:.1f}%)<br/>"
             
             legend = Paragraph(legend_text, self.styles['RMT_BodyText'])
@@ -1173,7 +1212,7 @@ class PDFReportGenerator:
                 bc.width = 400
                 bc.data = [daily_data]
                 bc.strokeColor = colors.black
-                bc.fillColor = colors.blue
+                bc.fillColor = self.pastel_colors['secondary']
                 
                 bc.valueAxis.valueMin = 0
                 bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
@@ -1189,39 +1228,82 @@ class PDFReportGenerator:
                 story.append(drawing)
                 story.append(Spacer(1, 0.5*inch))  # Increased spacing
             
-            # Sessions for this subject
+            # Sessions for this subject - group by date like the main timeline
             sessions_title = Paragraph("Sessions", self.styles['RMT_SectionHeader'])
             story.append(sessions_title)
             
             if subject_sessions:
-                subject_session_data = [['Date', 'Start Time', 'End Time', 'Duration']]
+                # Group sessions by date
+                subject_sessions_by_date = {}
+                for session in subject_sessions:
+                    date_key = session['start_time'].date()
+                    if date_key not in subject_sessions_by_date:
+                        subject_sessions_by_date[date_key] = []
+                    subject_sessions_by_date[date_key].append(session)
                 
-                for session in sorted(subject_sessions, key=lambda x: x['start_time'], reverse=True):
-                    date = session['start_time'].astimezone(MANILA_TZ).strftime('%Y-%m-%d')
-                    start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                    end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                # Create session tables for each date
+                for date, day_sessions in sorted(subject_sessions_by_date.items(), reverse=True):
+                    # Date header
+                    date_header = Paragraph(f"<b>{date.strftime('%Y-%m-%d')}</b>", self.styles['RMT_BodyText'])
+                    story.append(date_header)
                     
-                    subject_session_data.append([
-                        date,
-                        start_time,
-                        end_time,
-                        self._format_time(session['total_study_time'])
+                    # Create session table for this date
+                    session_data = [['Start Time', 'End Time', 'Duration']]  # Header row
+                    
+                    # Add session rows
+                    for session in sorted(day_sessions, key=lambda x: x['start_time']):
+                        start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                        end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                        
+                        session_data.append([
+                            start_time,
+                            end_time,
+                            self._format_time(session['total_study_time'])
+                        ])
+                    
+                    # Calculate day total
+                    day_total = sum(session['total_study_time'] for session in day_sessions)
+                    
+                    # Add total row
+                    session_data.append([
+                        "<b>Total</b>",
+                        "",
+                        f"<b>{self._format_time(day_total)}</b>"
                     ])
-                
-                subject_session_table = Table(subject_session_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
-                subject_session_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                    ('BOX', (0, 0), (-1, -1), 1, colors.black),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ]))
-                
-                story.append(subject_session_table)
+                    
+                    # Create and style the table
+                    date_table = Table(session_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch])
+                    
+                    # Apply styling
+                    row_styles = []
+                    for i in range(len(session_data)):
+                        if i == 0:  # Header row
+                            row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['primary']))
+                            row_styles.append(('TEXTCOLOR', (0, i), (-1, i), colors.white))
+                            row_styles.append(('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'))
+                            row_styles.append(('ALIGN', (0, i), (-1, i), 'CENTER'))
+                        elif i == len(session_data) - 1:  # Total row
+                            row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['accent1']))
+                            row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))
+                        else:  # Data rows
+                            if i % 2 == 1:  # Alternate row coloring
+                                row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['contrast']))
+                            row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))  # Right-align duration
+                            row_styles.append(('ALIGN', (0, i), (1, i), 'CENTER'))  # Center-align times
+                    
+                    # General table styling
+                    date_table.setStyle(TableStyle([
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                        ('BOX', (0, 0), (-1, -1), 1, colors.black),
+                        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                        ('TOPPADDING', (0, 0), (-1, -1), 6),
+                        *row_styles
+                    ]))
+                    
+                    story.append(date_table)
+                    story.append(Spacer(1, 0.3*inch))  # Add space between date sections
             else:
                 no_sessions = Paragraph("No sessions recorded for this subject.", self.styles['RMT_BodyText'])
                 story.append(no_sessions)
