@@ -365,6 +365,13 @@ class PDFReportGenerator:
             spaceAfter=6
         ))
         self.styles.add(ParagraphStyle(
+            name='Footer',
+            parent=self.styles['Normal'],
+            fontSize=8,
+            alignment=1,  # Center
+            textColor=colors.gray
+        ))
+        self.styles.add(ParagraphStyle(
             name='TableHeader',
             parent=self.styles['Normal'],
             fontSize=10,
@@ -446,11 +453,246 @@ class PDFReportGenerator:
             
             story.append(table)
         
+        # Add creator footer
+        story.append(Spacer(1, 0.3*inch))
+        footer = Paragraph("© Study tracker created by Eli.", self.styles['Footer'])
+        story.append(footer)
+        
         # Build PDF
         doc.build(story)
         buffer.seek(0)
         return buffer
         
+    def generate_full_report(self, user_name, sessions):
+        """Generate a comprehensive PDF report of all study sessions."""
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        story = []
+        
+        # Title
+        title = Paragraph(f"Study Progress Report of {user_name}, RMT", self.styles['Title'])
+        story.append(title)
+        story.append(Spacer(1, 0.5*inch))
+        
+        if not sessions:
+            no_data = Paragraph("No study sessions recorded yet.", self.styles['Normal'])
+            story.append(no_data)
+            
+            # Add creator footer even when there's no data
+            story.append(Spacer(1, 0.5*inch))
+            footer = Paragraph("© Study tracker created by Eli.", self.styles['Footer'])
+            story.append(footer)
+            
+            doc.build(story)
+            buffer.seek(0)
+            return buffer
+        
+        # Sort sessions by date
+        sessions.sort(key=lambda x: x['start_time'])
+        
+        # Group sessions by date
+        sessions_by_date = {}
+        for session in sessions:
+            date_key = session['start_time'].date()
+            if date_key not in sessions_by_date:
+                sessions_by_date[date_key] = []
+            sessions_by_date[date_key].append(session)
+        
+        # Add overall statistics
+        total_study_time = sum(session['total_study_time'] for session in sessions)
+        total_days = len(sessions_by_date)
+        
+        stats_para = Paragraph(
+            f"Total Study Time: {self._format_time(total_study_time)}<br/>"
+            f"Days Studied: {total_days}<br/>"
+            f"Average Study Time per Day: {self._format_time(total_study_time / max(1, total_days))}", 
+            self.styles['Normal']
+        )
+        story.append(stats_para)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Daily study time chart
+        daily_chart_title = Paragraph("Daily Study Time", self.styles['Subtitle'])
+        story.append(daily_chart_title)
+        
+        daily_data = []
+        daily_labels = []
+        
+        for date, day_sessions in sorted(sessions_by_date.items()):
+            day_total = sum(session['total_study_time'] for session in day_sessions) / 3600  # Convert to hours
+            daily_data.append(day_total)
+            daily_labels.append(date.strftime("%m/%d"))
+        
+        drawing = Drawing(400, 200)
+        bc = VerticalBarChart()
+        bc.x = 50
+        bc.y = 50
+        bc.height = 125
+        bc.width = 300
+        bc.data = [daily_data]
+        bc.strokeColor = colors.black
+        
+        bc.valueAxis.valueMin = 0
+        bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
+        bc.valueAxis.valueStep = 1
+        bc.categoryAxis.labels.boxAnchor = 'ne'
+        bc.categoryAxis.labels.dx = 8
+        bc.categoryAxis.labels.dy = -2
+        bc.categoryAxis.labels.angle = 30
+        bc.categoryAxis.categoryNames = daily_labels
+        
+        drawing.add(bc)
+        story.append(drawing)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Subject breakdown
+        subject_title = Paragraph("Subject Breakdown", self.styles['Subtitle'])
+        story.append(subject_title)
+        
+        # Group study time by subject
+        subject_times = {}
+        for session in sessions:
+            subject = session['subject']
+            if subject not in subject_times:
+                subject_times[subject] = 0
+            subject_times[subject] += session['total_study_time']
+        
+        # Create table for subject breakdown
+        subject_data = [['Subject', 'Total Time', 'Percentage']]
+        
+        for subject, time in sorted(subject_times.items(), key=lambda x: x[1], reverse=True):
+            percentage = (time / total_study_time) * 100
+            subject_data.append([
+                subject, 
+                self._format_time(time), 
+                f"{percentage:.1f}%"
+            ])
+        
+        subject_table = Table(subject_data, colWidths=[2*inch, 1.5*inch, 1*inch])
+        subject_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ]))
+        
+        story.append(subject_table)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Daily timeline
+        timeline_title = Paragraph("Daily Timeline", self.styles['Subtitle'])
+        story.append(timeline_title)
+        
+        for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
+            date_title = Paragraph(f"{date.strftime('%Y-%m-%d')}", self.styles['Normal'])
+            story.append(date_title)
+            
+            day_total = sum(session['total_study_time'] for session in day_sessions)
+            day_stats = Paragraph(
+                f"Total study time: {self._format_time(day_total)}", 
+                self.styles['Normal']
+            )
+            story.append(day_stats)
+            
+            session_data = [['Subject', 'Start Time', 'End Time', 'Duration']]
+            
+            for session in sorted(day_sessions, key=lambda x: x['start_time']):
+                start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                
+                session_data.append([
+                    session['subject'],
+                    start_time,
+                    end_time,
+                    self._format_time(session['total_study_time'])
+                ])
+            
+            session_table = Table(session_data, colWidths=[1.25*inch, 1.25*inch, 1.25*inch, 1.25*inch])
+            session_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            
+            story.append(session_table)
+            story.append(Spacer(1, 0.2*inch))
+        
+        # Subject detail pages
+        for subject in sorted(subject_times.keys()):
+            story.append(PageBreak())
+            
+            subject_page_title = Paragraph(f"Subject: {subject}", self.styles['Title'])
+            story.append(subject_page_title)
+            story.append(Spacer(1, 0.3*inch))
+            
+            subject_total = subject_times[subject]
+            subject_sessions = [s for s in sessions if s['subject'] == subject]
+            subject_percentage = (subject_total / total_study_time) * 100
+            
+            subject_summary = Paragraph(
+                f"Total Time: {self._format_time(subject_total)}<br/>"
+                f"Percentage of Total Study Time: {subject_percentage:.1f}%<br/>"
+                f"Number of Sessions: {len(subject_sessions)}", 
+                self.styles['Normal']
+            )
+            story.append(subject_summary)
+            story.append(Spacer(1, 0.3*inch))
+            
+            # Sessions for this subject
+            sessions_title = Paragraph("Sessions", self.styles['Subtitle'])
+            story.append(sessions_title)
+            
+            if subject_sessions:
+                subject_session_data = [['Date', 'Start Time', 'End Time', 'Duration']]
+                
+                for session in sorted(subject_sessions, key=lambda x: x['start_time'], reverse=True):
+                    date = session['start_time'].astimezone(MANILA_TZ).strftime('%Y-%m-%d')
+                    start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                    end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                    
+                    subject_session_data.append([
+                        date,
+                        start_time,
+                        end_time,
+                        self._format_time(session['total_study_time'])
+                    ])
+                
+                subject_session_table = Table(subject_session_data, colWidths=[1.25*inch, 1.25*inch, 1.25*inch, 1.25*inch])
+                subject_session_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ]))
+                
+                story.append(subject_session_table)
+            else:
+                no_sessions = Paragraph("No sessions recorded for this subject.", self.styles['Normal'])
+                story.append(no_sessions)
+            
+            # Add creator footer to each subject page
+            story.append(Spacer(1, 0.5*inch))
+            footer = Paragraph("© Study tracker created by Eli.", self.styles['Footer'])
+            story.append(footer)
+        
+        # For the main page, add creator footer at the end
+        if not subject_times:
+            story.append(Spacer(1, 0.5*inch))
+            footer = Paragraph("© Study tracker created by Eli.", self.styles['Footer'])
+            story.append(footer)
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        return buffer
+    
     def generate_full_report(self, user_name, sessions):
         """Generate a comprehensive PDF report of all study sessions."""
         buffer = io.BytesIO()
