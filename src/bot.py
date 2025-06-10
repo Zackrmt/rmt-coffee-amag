@@ -3091,7 +3091,7 @@ async def run_bot_with_retries():
             # Add command handlers
             application.add_handler(CommandHandler('start', telegram_bot.start))
             application.add_handler(CommandHandler('MYSTUDYdownload', telegram_bot.generate_overall_progress_report))
-            application.add_handler(CommandHandler('MYSTUDYtoday', telegram_bot.generate_today_report))
+            application.add_handler(CommandHandler('MYSTUDYtoday', telegram_bot.generate_day_report))
             application.add_handler(CommandHandler('reset_mydata', telegram_bot.reset_user_data))
             
             # Add reset data confirmation handlers
