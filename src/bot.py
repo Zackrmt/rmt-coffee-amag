@@ -125,7 +125,7 @@ class GoogleDriveDB:
         self.database_folder_id = None
         self.initialized = False
         
-    def initialize(self):
+    def initialize(self):# In the GoogleDriveDB.initialize method:
         """Initialize Google Drive API client."""
         try:
             credentials = service_account.Credentials.from_service_account_file(
@@ -140,6 +140,7 @@ class GoogleDriveDB:
             return True
         except Exception as e:
             logger.error(f"Failed to initialize Google Drive database: {e}")
+            logger.warning("Continuing without Google Drive integration - some features will be limited")
             return False
             
     def _get_or_create_folder(self, folder_name):
@@ -752,8 +753,7 @@ class PDFReportGenerator:
         buffer.seek(0)
         return buffer
 
-# ================== SINGLE INSTANCE CHECK ==================
-def ensure_single_instance():
+# ================== SINGLE INSTANCE CHECK ==================def ensure_single_instance():
     """Ensure only one instance of the bot is running."""
     try:
         # Check if PID file exists
@@ -766,17 +766,14 @@ def ensure_single_instance():
                 # Send signal 0 to check if process exists without actually sending a signal
                 os.kill(old_pid, 0)
                 
-                # Process exists, let's check if it's a Python process (very rough check)
-                # This might not work on all platforms but good enough for Render
-                import psutil
-                if psutil.pid_exists(old_pid):
-                    proc = psutil.Process(old_pid)
-                    if 'python' in proc.name().lower() or 'python' in ' '.join(proc.cmdline()).lower():
-                        logger.warning(f"Another instance is already running with PID {old_pid}. Exiting.")
-                        sys.exit(1)
+                # Process exists
+                logger.warning(f"Another instance is already running with PID {old_pid}. Exiting.")
+                sys.exit(1)
+                
             except OSError:
-                # Process doesn't exist
+                # Process doesn't exist - stale PID file
                 logger.info(f"Stale PID file found. Previous instance (PID {old_pid}) is not running.")
+                # Continue with starting the bot
         
         # Write our PID to the file
         with open(PID_FILE, 'w') as f:
