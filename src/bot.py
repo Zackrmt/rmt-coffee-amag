@@ -341,46 +341,46 @@ class GoogleDriveDB:
 
 # ================== PDF REPORT GENERATOR ==================
 class PDFReportGenerator:
-def __init__(self):
-    self.styles = getSampleStyleSheet()
-    # Create custom styles
-    self.styles.add(ParagraphStyle(
-        name='ReportTitle',
-        parent=self.styles['Heading1'],
-        fontSize=16,
-        alignment=1,  # Center
-        spaceAfter=12
-    ))
-    self.styles.add(ParagraphStyle(
-        name='ReportSubtitle',
-        parent=self.styles['Heading2'],
-        fontSize=14,
-        alignment=1,
-        spaceAfter=10
-    ))
-    # Check if Normal style exists before adding it
-    if 'NormalCustom' not in self.styles:
+    def __init__(self):
+        self.styles = getSampleStyleSheet()
+        # Create custom styles
         self.styles.add(ParagraphStyle(
-            name='NormalCustom',
+            name='ReportTitle',
+            parent=self.styles['Heading1'],
+            fontSize=16,
+            alignment=1,  # Center
+            spaceAfter=12
+        ))
+        self.styles.add(ParagraphStyle(
+            name='ReportSubtitle',
+            parent=self.styles['Heading2'],
+            fontSize=14,
+            alignment=1,
+            spaceAfter=10
+        ))
+        # Check if Normal style exists before adding it
+        if 'NormalCustom' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='NormalCustom',
+                parent=self.styles['Normal'],
+                fontSize=10,
+                spaceAfter=6
+            ))
+        self.styles.add(ParagraphStyle(
+            name='Footer',
+            parent=self.styles['Normal'],
+            fontSize=8,
+            alignment=1,  # Center
+            textColor=colors.gray
+        ))
+        self.styles.add(ParagraphStyle(
+            name='TableHeader',
             parent=self.styles['Normal'],
             fontSize=10,
-            spaceAfter=6
+            alignment=1,
+            textColor=colors.white,
+            backColor=colors.darkblue
         ))
-    self.styles.add(ParagraphStyle(
-        name='Footer',
-        parent=self.styles['Normal'],
-        fontSize=8,
-        alignment=1,  # Center
-        textColor=colors.gray
-    ))
-    self.styles.add(ParagraphStyle(
-        name='TableHeader',
-        parent=self.styles['Normal'],
-        fontSize=10,
-        alignment=1,
-        textColor=colors.white,
-        backColor=colors.darkblue
-    ))
         
     def _format_time(self, seconds):
         """Format seconds into hours and minutes."""
