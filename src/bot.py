@@ -1606,41 +1606,6 @@ class TelegramBot:
         # Initialize Google Drive DB
         self.db.initialize()
 
-    async def send_document(
-        self,
-        context: ContextTypes.DEFAULT_TYPE,
-        chat_id: int,
-        document,
-        filename: str,
-        caption: str = None,
-        should_delete: bool = False
-    ):
-        """Send a document with proper thread ID handling."""
-        self.record_activity()
-        
-        # Get thread_id from user_data if available
-        thread_id = None
-        if 'thread_id' in context.user_data:
-            thread_id = context.user_data['thread_id']
-        elif context.user_data.get('current_thread_id'):
-            thread_id = context.user_data['current_thread_id']
-        
-        # Send the document with thread_id if in a topic
-        message = await context.bot.send_document(
-            chat_id=chat_id,
-            document=document,
-            filename=filename,
-            caption=caption,
-            message_thread_id=thread_id
-        )
-        
-        if should_delete:
-            if 'messages_to_delete' not in context.user_data:
-                context.user_data['messages_to_delete'] = []
-            context.user_data['messages_to_delete'].append(message.message_id)
-        
-        return message.message_id
-
     async def cleanup_all_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clean up ALL messages including those marked to keep."""
         messages_to_delete = context.user_data.get('messages_to_delete', [])
@@ -1712,6 +1677,41 @@ class TelegramBot:
             
         return message.message_id
 
+    async def send_document(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+        chat_id: int,
+        document,
+        filename: str,
+        caption: str = None,
+        should_delete: bool = False
+    ):
+        """Send a document with proper thread ID handling."""
+        self.record_activity()
+        
+        # Get thread_id from user_data if available
+        thread_id = None
+        if 'thread_id' in context.user_data:
+            thread_id = context.user_data['thread_id']
+        elif context.user_data.get('current_thread_id'):
+            thread_id = context.user_data['current_thread_id']
+        
+        # Send the document with thread_id if in a topic
+        message = await context.bot.send_document(
+            chat_id=chat_id,
+            document=document,
+            filename=filename,
+            caption=caption,
+            message_thread_id=thread_id
+        )
+        
+        if should_delete:
+            if 'messages_to_delete' not in context.user_data:
+                context.user_data['messages_to_delete'] = []
+            context.user_data['messages_to_delete'].append(message.message_id)
+        
+        return message.message_id
+
     def record_activity(self):
         """Update last activity timestamp"""
         self.last_activity = datetime.datetime.now()
@@ -1738,6 +1738,11 @@ class TelegramBot:
         # Store the thread_id if the message is in a topic
         if update.message and update.message.is_topic_message:
             context.user_data['thread_id'] = update.message.message_thread_id
+            logger.info(f"Started in thread {update.message.message_thread_id}")
+        else:
+            # Clear any existing thread_id if this is in main chat
+            if 'thread_id' in context.user_data:
+                del context.user_data['thread_id']
         
         buttons = [
             [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
@@ -1818,6 +1823,12 @@ class TelegramBot:
         context.user_data['previous_state'] = CHOOSING_MAIN_MENU
         query = update.callback_query
         await query.answer()
+        
+        # Check if we're in a topic/thread
+        if update.callback_query.message and update.callback_query.message.is_topic_message:
+            # Update the thread_id in user_data
+            context.user_data['thread_id'] = update.callback_query.message.message_thread_id
+            
         await self.cleanup_messages(update, context)
 
         buttons = [
@@ -1866,6 +1877,11 @@ class TelegramBot:
         query = update.callback_query
         await query.answer()
         
+        # Check if we're in a topic/thread
+        if update.callback_query.message and update.callback_query.message.is_topic_message:
+            # Update the thread_id in user_data
+            context.user_data['thread_id'] = update.callback_query.message.message_thread_id
+        
         try:
             await query.message.delete()
         except Exception as e:
@@ -1901,6 +1917,10 @@ class TelegramBot:
                 raise ValueError
                 
             context.user_data['goal_time'] = goal_input
+            
+            # Store the thread_id if the message is in a topic
+            if update.message and update.message.is_topic_message:
+                context.user_data['thread_id'] = update.message.message_thread_id
             
             try:
                 await update.message.delete()
@@ -1967,6 +1987,11 @@ class TelegramBot:
         self.record_activity()
         query = update.callback_query
         await query.answer()
+        
+        # Check if we're in a topic/thread
+        if update.callback_query.message and update.callback_query.message.is_topic_message:
+            # Update the thread_id in user_data
+            context.user_data['thread_id'] = update.callback_query.message.message_thread_id
         
         try:
             await query.message.delete()
@@ -2044,6 +2069,11 @@ class TelegramBot:
         query = update.callback_query
         await query.answer()
         
+        # Check if we're in a topic/thread
+        if update.callback_query.message and update.callback_query.message.is_topic_message:
+            # Update the thread_id in user_data
+            context.user_data['thread_id'] = update.callback_query.message.message_thread_id
+        
         try:
             await query.message.delete()
         except Exception as e:
@@ -2107,6 +2137,11 @@ class TelegramBot:
         self.record_activity()
         query = update.callback_query
         await query.answer()
+        
+        # Check if we're in a topic/thread
+        if update.callback_query.message and update.callback_query.message.is_topic_message:
+            # Update the thread_id in user_data
+            context.user_data['thread_id'] = update.callback_query.message.message_thread_id
         
         try:
             await query.message.delete()
@@ -2243,6 +2278,11 @@ class TelegramBot:
         query = update.callback_query
         await query.answer()
         
+        # Check if we're in a topic/thread
+        if update.callback_query.message and update.callback_query.message.is_topic_message:
+            # Update the thread_id in user_data
+            context.user_data['thread_id'] = update.callback_query.message.message_thread_id
+        
         try:
             await query.message.delete()
         except Exception as e:
@@ -2275,9 +2315,10 @@ class TelegramBot:
             pdf_buffer = self.pdf_generator.generate_session_report(user_name, last_session)
             
             # Send the PDF file
-            await context.bot.send_document(
-                chat_id=update.effective_chat.id,
-                document=pdf_buffer,
+            await self.send_document(
+                context,
+                update.effective_chat.id,
+                pdf_buffer,
                 filename=f"Session Report - {user_name}, RMT.pdf",
                 caption=f"Here's your session report, {user_name}!"
             )
@@ -2310,6 +2351,11 @@ class TelegramBot:
         self.record_activity()
         query = update.callback_query
         await query.answer()
+        
+        # Check if we're in a topic/thread
+        if update.callback_query.message and update.callback_query.message.is_topic_message:
+            # Update the thread_id in user_data
+            context.user_data['thread_id'] = update.callback_query.message.message_thread_id
         
         try:
             await query.message.delete()
@@ -2346,9 +2392,10 @@ class TelegramBot:
             pdf_buffer = self.pdf_generator.generate_daily_report(user_name, today, today_sessions)
             
             # Send the PDF file
-            await context.bot.send_document(
-                chat_id=update.effective_chat.id,
-                document=pdf_buffer,
+            await self.send_document(
+                context,
+                update.effective_chat.id,
+                pdf_buffer,
                 filename=f"Daily Study Report {today.strftime('%Y-%m-%d')} - {user_name}, RMT.pdf",
                 caption=f"Here's your daily study report, {user_name}!"
             )
@@ -2384,6 +2431,12 @@ class TelegramBot:
         if update.callback_query:
             query = update.callback_query
             await query.answer()
+            
+            # Check if we're in a topic/thread
+            if update.callback_query.message and update.callback_query.message.is_topic_message:
+                # Update the thread_id in user_data
+                context.user_data['thread_id'] = update.callback_query.message.message_thread_id
+            
             try:
                 # Don't delete the main menu message
                 if update.callback_query.message.text != "Welcome to RMT Study Bot! 📚✨":
@@ -2418,9 +2471,10 @@ class TelegramBot:
             pdf_buffer = self.pdf_generator.generate_full_report(user_name, all_sessions)
             
             # Send the PDF file
-            await context.bot.send_document(
-                chat_id=update.effective_chat.id,
-                document=pdf_buffer,
+            await self.send_document(
+                context,
+                update.effective_chat.id,
+                pdf_buffer,
                 filename=f"Study Progress Report of {user_name}, RMT.pdf",
                 caption=f"Here's your complete study progress report, {user_name}!"
             )
@@ -2457,6 +2511,12 @@ class TelegramBot:
         if update.callback_query:
             query = update.callback_query
             await query.answer()
+            
+            # Check if we're in a topic/thread
+            if update.callback_query.message and update.callback_query.message.is_topic_message:
+                # Update the thread_id in user_data
+                context.user_data['thread_id'] = update.callback_query.message.message_thread_id
+            
             try:
                 # Don't delete the main menu message
                 if update.callback_query.message.text != "Welcome to RMT Study Bot! 📚✨":
@@ -2494,9 +2554,10 @@ class TelegramBot:
             pdf_buffer = self.pdf_generator.generate_daily_report(user_name, today, today_sessions)
             
             # Send the PDF file
-            await context.bot.send_document(
-                chat_id=update.effective_chat.id,
-                document=pdf_buffer,
+            await self.send_document(
+                context,
+                update.effective_chat.id,
+                pdf_buffer,
                 filename=f"Daily Study Report {today.strftime('%Y-%m-%d')} - {user_name}, RMT.pdf",
                 caption=f"Here's your study report for today, {user_name}!"
             )
@@ -2532,6 +2593,11 @@ class TelegramBot:
         if query:
             await query.answer()
             
+            # Check if we're in a topic/thread
+            if update.callback_query.message and update.callback_query.message.is_topic_message:
+                # Update the thread_id in user_data
+                context.user_data['thread_id'] = update.callback_query.message.message_thread_id
+            
             try:
                 await query.message.delete()
             except Exception as e:
@@ -2565,6 +2631,11 @@ class TelegramBot:
         self.record_activity()
         query = update.callback_query
         await query.answer()
+        
+        # Check if we're in a topic/thread
+        if update.callback_query.message and update.callback_query.message.is_topic_message:
+            # Update the thread_id in user_data
+            context.user_data['thread_id'] = update.callback_query.message.message_thread_id
         
         try:
             await query.message.delete()
