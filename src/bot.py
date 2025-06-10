@@ -10,6 +10,7 @@ import atexit
 import json
 import io
 import re
+import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Optional, Set, List, Any
 import pytz
@@ -29,13 +30,14 @@ from telegram.ext import (
 from telegram.error import Conflict
 
 # For PDF generation
-from reportlab.lib.pagesizes import A4, A7
+from reportlab.lib.pagesizes import A4, A5, A6
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics.charts.linecharts import HorizontalLineChart
 from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.charts.piecharts import Pie
 from reportlab.lib.units import inch, cm
 
 # For Google Drive API
@@ -63,7 +65,7 @@ PST_TZ = pytz.timezone('America/Los_Angeles')
 MANILA_TZ = pytz.timezone('Asia/Manila')
 
 # Current date and user information
-CURRENT_DATE = "2025-06-08"
+CURRENT_DATE = datetime.datetime.now().strftime("%Y-%m-%d")
 CURRENT_USER = "Zackrmt"
 
 # Process ID file for single instance check
@@ -118,30 +120,55 @@ SUBJECTS = {
     "Others🤓": "OTHERS"
 }
 
+# Attempt to create credentials file placeholder if it doesn't exist
+if not os.path.exists(CREDENTIALS_FILE):
+    try:
+        # Create a directory for the file if it doesn't exist
+        os.makedirs(os.path.dirname(CREDENTIALS_FILE), exist_ok=True)
+        # Inform user about missing credentials
+        logger.warning(f"Google Drive credentials file {CREDENTIALS_FILE} not found.")
+    except Exception as e:
+        logger.error(f"Failed to create credentials directory: {e}")
+
 # ================== GOOGLE DRIVE DATABASE ==================
 class GoogleDriveDB:
     def __init__(self):
         self.drive_service = None
         self.database_folder_id = None
         self.initialized = False
+        self.local_backup = {}  # For fallback when Google Drive is unavailable
         
-    def initialize(self):# In the GoogleDriveDB.initialize method:
-        """Initialize Google Drive API client."""
-        try:
-            credentials = service_account.Credentials.from_service_account_file(
-                CREDENTIALS_FILE, scopes=SCOPES)
-            self.drive_service = build('drive', 'v3', credentials=credentials)
-            
-            # Create or find the database folder
-            self.database_folder_id = self._get_or_create_folder(DATABASE_FOLDER_NAME)
-            
-            self.initialized = True
-            logger.info("Google Drive database initialized successfully")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to initialize Google Drive database: {e}")
-            logger.warning("Continuing without Google Drive integration - some features will be limited")
-            return False
+    def initialize(self):
+        """Initialize Google Drive API client with retries."""
+        max_retries = 3
+        retry_delay = 5  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                if not os.path.exists(CREDENTIALS_FILE):
+                    logger.warning(f"Credentials file {CREDENTIALS_FILE} not found. Running with local storage only.")
+                    return False
+                    
+                credentials = service_account.Credentials.from_service_account_file(
+                    CREDENTIALS_FILE, scopes=SCOPES)
+                self.drive_service = build('drive', 'v3', credentials=credentials)
+                
+                # Create or find the database folder
+                self.database_folder_id = self._get_or_create_folder(DATABASE_FOLDER_NAME)
+                
+                self.initialized = True
+                logger.info("Google Drive database initialized successfully")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Drive initialization attempt {attempt+1} failed: {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # exponential backoff
+                else:
+                    logger.error("All Google Drive initialization attempts failed")
+                    return False
             
     def _get_or_create_folder(self, folder_name):
         """Get or create a folder in Google Drive."""
@@ -169,7 +196,10 @@ class GoogleDriveDB:
         """Save user data to Google Drive."""
         if not self.initialized:
             if not self.initialize():
-                return False
+                # Store in local backup
+                self.local_backup[user_id] = data
+                logger.warning(f"Saved data for user {user_id} to local backup only")
+                return True
                 
         try:
             # Convert data to JSON string
@@ -206,13 +236,24 @@ class GoogleDriveDB:
                 ).execute()
                 logger.info(f"Created new data file for user {user_id}")
                 
+            # Also update local backup
+            self.local_backup[user_id] = data
             return True
         except Exception as e:
-            logger.error(f"Error saving user data: {e}")
-            return False
+            logger.error(f"Error saving user data to Drive: {e}")
+            # Store in local backup
+            self.local_backup[user_id] = data
+            logger.warning(f"Saved data for user {user_id} to local backup only")
+            return True  # Return True since we saved to local backup
             
     def load_user_data(self, user_id):
-        """Load user data from Google Drive."""
+        """Load user data from Google Drive or local backup."""
+        # Try to load from local backup first for speed
+        if user_id in self.local_backup:
+            logger.info(f"Loaded data for user {user_id} from local backup")
+            return self.local_backup[user_id]
+            
+        # Try to load from Google Drive
         if not self.initialized:
             if not self.initialize():
                 return None
@@ -234,10 +275,13 @@ class GoogleDriveDB:
             else:
                 data = json.loads(file_content)
                 
-            logger.info(f"Loaded data for user {user_id}")
+            logger.info(f"Loaded data for user {user_id} from Google Drive")
+            
+            # Update local backup
+            self.local_backup[user_id] = data
             return data
         except Exception as e:
-            logger.error(f"Error loading user data: {e}")
+            logger.error(f"Error loading user data from Drive: {e}")
             return None
             
     def _get_file_id(self, file_name):
@@ -261,14 +305,7 @@ class GoogleDriveDB:
 
     def save_study_session(self, user_id, user_name, study_session):
         """Save study session to the user's session history."""
-        if not self.initialized:
-            if not self.initialize():
-                return False
-                
         try:
-            # Get existing data or create new
-            data = self.load_user_data(user_id) or {'user_name': user_name, 'sessions': []}
-            
             # Convert StudySession to serializable dict
             session_dict = {
                 'user_id': study_session.user_id,
@@ -289,10 +326,13 @@ class GoogleDriveDB:
                 'progress_percentage': study_session.get_progress_percentage()
             }
             
+            # Get existing data or create new
+            data = self.load_user_data(user_id) or {'user_name': user_name, 'sessions': []}
+            
             # Add to sessions list
             data['sessions'].append(session_dict)
             
-            # Save back to Drive
+            # Save back to Drive or local backup
             return self.save_user_data(user_id, data)
             
         except Exception as e:
@@ -301,10 +341,6 @@ class GoogleDriveDB:
 
     def get_user_study_sessions(self, user_id):
         """Get all study sessions for a user."""
-        if not self.initialized:
-            if not self.initialize():
-                return []
-                
         try:
             data = self.load_user_data(user_id)
             if not data or 'sessions' not in data:
@@ -314,13 +350,16 @@ class GoogleDriveDB:
             
             # Convert ISO dates to datetime objects
             for session in sessions:
-                session['start_time'] = datetime.datetime.fromisoformat(session['start_time'])
-                if session['end_time']:
-                    session['end_time'] = datetime.datetime.fromisoformat(session['end_time'])
-                
-                for break_period in session['break_periods']:
-                    break_period['start'] = datetime.datetime.fromisoformat(break_period['start'])
-                    break_period['end'] = datetime.datetime.fromisoformat(break_period['end'])
+                try:
+                    session['start_time'] = datetime.datetime.fromisoformat(session['start_time'])
+                    if session['end_time']:
+                        session['end_time'] = datetime.datetime.fromisoformat(session['end_time'])
+                    
+                    for break_period in session['break_periods']:
+                        break_period['start'] = datetime.datetime.fromisoformat(break_period['start'])
+                        break_period['end'] = datetime.datetime.fromisoformat(break_period['end'])
+                except Exception as e:
+                    logger.error(f"Error parsing session dates: {e}")
                     
             return sessions
         except Exception as e:
@@ -344,29 +383,46 @@ class GoogleDriveDB:
 class PDFReportGenerator:
     def __init__(self):
         self.styles = getSampleStyleSheet()
-        # Create custom styles
+        
+        # Create custom styles with professional appearance
         self.styles.add(ParagraphStyle(
             name='ReportTitle',
             parent=self.styles['Heading1'],
             fontSize=16,
             alignment=1,  # Center
-            spaceAfter=12
+            spaceAfter=12,
+            fontName='Helvetica-Bold',
+            textColor=colors.darkblue
         ))
+        
         self.styles.add(ParagraphStyle(
             name='ReportSubtitle',
             parent=self.styles['Heading2'],
             fontSize=14,
             alignment=1,
-            spaceAfter=10
+            spaceAfter=10,
+            fontName='Helvetica-Bold',
+            textColor=colors.navy
         ))
-        # Check if Normal style exists before adding it
-        if 'NormalCustom' not in self.styles:
-            self.styles.add(ParagraphStyle(
-                name='NormalCustom',
-                parent=self.styles['Normal'],
-                fontSize=10,
-                spaceAfter=6
-            ))
+        
+        self.styles.add(ParagraphStyle(
+            name='BodyText',  # Custom name to avoid conflicts
+            parent=self.styles['Normal'],
+            fontSize=10,
+            spaceAfter=8,
+            leading=14,  # Better line spacing
+            fontName='Helvetica'
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='SmallText',
+            parent=self.styles['Normal'],
+            fontSize=8,
+            spaceAfter=6,
+            leading=10,
+            fontName='Helvetica'
+        ))
+        
         self.styles.add(ParagraphStyle(
             name='Footer',
             parent=self.styles['Normal'],
@@ -374,13 +430,25 @@ class PDFReportGenerator:
             alignment=1,  # Center
             textColor=colors.gray
         ))
+        
         self.styles.add(ParagraphStyle(
             name='TableHeader',
             parent=self.styles['Normal'],
             fontSize=10,
             alignment=1,
             textColor=colors.white,
-            backColor=colors.darkblue
+            backColor=colors.darkblue,
+            fontName='Helvetica-Bold'
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='SectionHeader',
+            parent=self.styles['Heading3'],
+            fontSize=12,
+            fontName='Helvetica-Bold',
+            textColor=colors.navy,
+            spaceAfter=6,
+            spaceBefore=12
         ))
         
     def _format_time(self, seconds):
@@ -392,7 +460,8 @@ class PDFReportGenerator:
     def generate_session_report(self, user_name, session):
         """Generate a PDF report for a single study session."""
         buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A7)
+        # Use A6 instead of A7 for better readability
+        doc = SimpleDocTemplate(buffer, pagesize=A6)
         story = []
         
         # Title
@@ -402,43 +471,111 @@ class PDFReportGenerator:
         # User
         user_subtitle = Paragraph(f"{user_name}, RMT", self.styles['ReportSubtitle'])
         story.append(user_subtitle)
+        story.append(Spacer(1, 0.2*inch))
         
         # Session details
-        subject = Paragraph(f"Subject: {session['subject']}", self.styles['Normal'])
+        subject = Paragraph(f"Subject: {session['subject']}", self.styles['BodyText'])
         story.append(subject)
         
         # Format times for display
         start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
         end_time = session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p') if session['end_time'] else "Ongoing"
         
-        times = Paragraph(f"Started: {start_time}<br/>Ended: {end_time}", self.styles['Normal'])
+        times = Paragraph(f"Started: {start_time}<br/>Ended: {end_time}", self.styles['BodyText'])
         story.append(times)
         
-        study_time = Paragraph(f"Study Time: {self._format_time(session['total_study_time'])}", self.styles['Normal'])
-        story.append(study_time)
-        
-        break_time = Paragraph(f"Break Time: {self._format_time(session['total_break_time'])}", self.styles['Normal'])
-        story.append(break_time)
+        # Key statistics
+        stats_data = [
+            ['Metric', 'Value'],
+            ['Study Time', self._format_time(session['total_study_time'])],
+            ['Break Time', self._format_time(session['total_break_time'])]
+        ]
         
         if 'goal_time' in session and session['goal_time']:
-            progress = Paragraph(f"Goal Progress: {session['progress_percentage']}%", self.styles['Normal'])
-            story.append(progress)
+            stats_data.append(['Goal Progress', f"{session['progress_percentage']}%"])
+        
+        stats_table = Table(stats_data, colWidths=[1.5*inch, 1.5*inch])
+        stats_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        story.append(Spacer(1, 0.1*inch))
+        story.append(stats_table)
         
         # Break details if any
         if session['break_periods']:
-            story.append(Spacer(1, 0.2*inch))
-            breaks_title = Paragraph("Break Details:", self.styles['Normal'])
+            story.append(Spacer(1, 0.3*inch))
+            breaks_title = Paragraph("Break Details:", self.styles['SectionHeader'])
             story.append(breaks_title)
+            
+            break_data = [['#', 'Start', 'End', 'Duration']]
             
             for i, break_period in enumerate(session['break_periods']):
                 break_start = break_period['start'].astimezone(MANILA_TZ).strftime('%I:%M %p')
                 break_end = break_period['end'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                break_detail = Paragraph(f"Break {i+1}: {break_start} - {break_end}", self.styles['Normal'])
-                story.append(break_detail)
+                duration = (break_period['end'] - break_period['start']).total_seconds()
+                duration_str = f"{int(duration // 60)}m {int(duration % 60)}s"
+                
+                break_data.append([f"{i+1}", break_start, break_end, duration_str])
+            
+            break_table = Table(break_data, colWidths=[0.3*inch, 1.0*inch, 1.0*inch, 0.7*inch])
+            break_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BOX', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(break_table)
+        
+        # Add productivity chart if session has ended
+        if session['end_time']:
+            story.append(Spacer(1, 0.3*inch))
+            chart_title = Paragraph("Time Distribution", self.styles['SectionHeader'])
+            story.append(chart_title)
+            
+            # Create pie chart for study vs break time
+            drawing = Drawing(3*inch, 1.5*inch)
+            pie = Pie()
+            pie.x = 1.5*inch
+            pie.y = 0.75*inch
+            pie.width = 1.5*inch
+            pie.height = 1.5*inch
+            
+            study_time = session['total_study_time']
+            break_time = session['total_break_time']
+            
+            if study_time > 0 or break_time > 0:  # Avoid division by zero
+                pie.data = [study_time, break_time]
+                pie.labels = ['Study', 'Break']
+                pie.slices.strokeWidth = 0.5
+                pie.slices[0].fillColor = colors.darkblue
+                pie.slices[1].fillColor = colors.lightblue
+                drawing.add(pie)
+                story.append(drawing)
+                
+                # Add legend
+                legend = Paragraph(
+                    f"<font color='darkblue'>■</font> Study: {self._format_time(study_time)} ({100*study_time/(study_time+break_time):.1f}%)<br/>"
+                    f"<font color='lightblue'>■</font> Break: {self._format_time(break_time)} ({100*break_time/(study_time+break_time):.1f}%)",
+                    self.styles['SmallText']
+                )
+                story.append(legend)
         
         # Add creator footer
         story.append(Spacer(1, 0.3*inch))
-        footer = Paragraph("© Study tracker created by Eli.", self.styles['Footer'])
+        footer = Paragraph("Study tracker created by Eli.", self.styles['Footer'])
         story.append(footer)
         
         # Build PDF
@@ -449,7 +586,8 @@ class PDFReportGenerator:
     def generate_daily_report(self, user_name, date, sessions):
         """Generate a PDF report for a specific day."""
         buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A7)
+        # Use A5 instead of A7 for better readability
+        doc = SimpleDocTemplate(buffer, pagesize=A5)
         story = []
         
         # Title
@@ -459,21 +597,25 @@ class PDFReportGenerator:
         # User and Date
         user_date = Paragraph(f"{user_name}, RMT<br/>{date.strftime('%Y-%m-%d')}", self.styles['ReportSubtitle'])
         story.append(user_date)
-        story.append(Spacer(1, 0.2*inch))
+        story.append(Spacer(1, 0.3*inch))
         
         if not sessions:
-            no_data = Paragraph("No study sessions recorded for this date.", self.styles['Normal'])
+            no_data = Paragraph("No study sessions recorded for this date.", self.styles['BodyText'])
             story.append(no_data)
         else:
             # Summary statistics
             total_study_time = sum(session['total_study_time'] for session in sessions)
             total_break_time = sum(session['total_break_time'] for session in sessions)
             
-            study_time_para = Paragraph(f"Total Study Time: {self._format_time(total_study_time)}", self.styles['Normal'])
-            story.append(study_time_para)
+            stats_title = Paragraph("Summary Statistics", self.styles['SectionHeader'])
+            story.append(stats_title)
             
-            break_time_para = Paragraph(f"Total Break Time: {self._format_time(total_break_time)}", self.styles['Normal'])
-            story.append(break_time_para)
+            stats_data = [
+                ['Metric', 'Value'],
+                ['Total Study Time', self._format_time(total_study_time)],
+                ['Total Break Time', self._format_time(total_break_time)],
+                ['Total Sessions', str(len(sessions))]
+            ]
             
             ratio = "N/A"
             if total_break_time > 0:
@@ -489,33 +631,126 @@ class PDFReportGenerator:
                 if divisor > 0:
                     ratio = f"{study_minutes//divisor}:{break_minutes//divisor}"
             
-            ratio_para = Paragraph(f"Study:Break Ratio: {ratio}", self.styles['Normal'])
-            story.append(ratio_para)
-            story.append(Spacer(1, 0.2*inch))
+            stats_data.append(['Study:Break Ratio', ratio])
             
-            # Sessions table
-            table_data = [['Subject', 'Time']]
-            
-            for session in sessions:
-                subject = session['subject']
-                study_time = self._format_time(session['total_study_time'])
-                table_data.append([subject, study_time])
-            
-            table = Table(table_data, colWidths=[1.2*inch, 0.8*inch])
-            table.setStyle(TableStyle([
+            stats_table = Table(stats_data, colWidths=[2*inch, 2*inch])
+            stats_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BOX', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ]))
+            story.append(stats_table)
+            story.append(Spacer(1, 0.3*inch))
             
-            story.append(table)
+            # Time distribution chart
+            chart_title = Paragraph("Time Distribution", self.styles['SectionHeader'])
+            story.append(chart_title)
+            
+            if total_study_time > 0 or total_break_time > 0:
+                drawing = Drawing(4*inch, 2*inch)
+                pie = Pie()
+                pie.x = 2*inch
+                pie.y = 1*inch
+                pie.width = 2*inch
+                pie.height = 2*inch
+                pie.data = [total_study_time, total_break_time]
+                pie.labels = ['Study', 'Break']
+                pie.slices.strokeWidth = 0.5
+                pie.slices[0].fillColor = colors.darkblue
+                pie.slices[1].fillColor = colors.lightblue
+                drawing.add(pie)
+                story.append(drawing)
+                
+                # Add legend
+                total_time = total_study_time + total_break_time
+                if total_time > 0:
+                    legend = Paragraph(
+                        f"<font color='darkblue'>■</font> Study: {self._format_time(total_study_time)} ({100*total_study_time/total_time:.1f}%)<br/>"
+                        f"<font color='lightblue'>■</font> Break: {self._format_time(total_break_time)} ({100*total_break_time/total_time:.1f}%)",
+                        self.styles['BodyText']
+                    )
+                    story.append(legend)
+            
+            story.append(Spacer(1, 0.3*inch))
+            
+            # Subject breakdown
+            sessions_by_subject = {}
+            for session in sessions:
+                subject = session['subject']
+                if subject not in sessions_by_subject:
+                    sessions_by_subject[subject] = 0
+                sessions_by_subject[subject] += session['total_study_time']
+            
+            subject_title = Paragraph("Subject Breakdown", self.styles['SectionHeader'])
+            story.append(subject_title)
+            
+            if sessions_by_subject:
+                subject_data = [['Subject', 'Time', 'Percentage']]
+                
+                for subject, time in sorted(sessions_by_subject.items(), key=lambda x: x[1], reverse=True):
+                    percentage = (time / total_study_time) * 100 if total_study_time > 0 else 0
+                    subject_data.append([
+                        subject, 
+                        self._format_time(time), 
+                        f"{percentage:.1f}%"
+                    ])
+                
+                subject_table = Table(subject_data, colWidths=[2*inch, 1*inch, 1*inch])
+                subject_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('BOX', (0, 0), (-1, -1), 1, colors.black),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ]))
+                story.append(subject_table)
+            
+            story.append(Spacer(1, 0.3*inch))
+            
+            # Session details
+            session_title = Paragraph("Session Details", self.styles['SectionHeader'])
+            story.append(session_title)
+            
+            session_data = [['Subject', 'Start', 'End', 'Duration']]
+            
+            for session in sorted(sessions, key=lambda x: x['start_time']):
+                start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                
+                session_data.append([
+                    session['subject'],
+                    start_time,
+                    end_time,
+                    self._format_time(session['total_study_time'])
+                ])
+            
+            session_table = Table(session_data, colWidths=[1*inch, 1*inch, 1*inch, 1*inch])
+            session_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BOX', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(session_table)
         
         # Add creator footer
-        story.append(Spacer(1, 0.3*inch))
-        footer = Paragraph("© Study tracker created by Eli.", self.styles['Footer'])
+        story.append(Spacer(1, 0.5*inch))
+        footer = Paragraph("Study tracker created by Eli.", self.styles['Footer'])
         story.append(footer)
         
         # Build PDF
@@ -535,12 +770,12 @@ class PDFReportGenerator:
         story.append(Spacer(1, 0.5*inch))
         
         if not sessions:
-            no_data = Paragraph("No study sessions recorded yet.", self.styles['Normal'])
+            no_data = Paragraph("No study sessions recorded yet.", self.styles['BodyText'])
             story.append(no_data)
             
             # Add creator footer even when there's no data
             story.append(Spacer(1, 0.5*inch))
-            footer = Paragraph("© Study tracker created by Eli.", self.styles['Footer'])
+            footer = Paragraph("Study tracker created by Eli.", self.styles['Footer'])
             story.append(footer)
             
             doc.build(story)
@@ -558,21 +793,92 @@ class PDFReportGenerator:
                 sessions_by_date[date_key] = []
             sessions_by_date[date_key].append(session)
         
-        # Add overall statistics
+        # Calculate overall statistics
         total_study_time = sum(session['total_study_time'] for session in sessions)
+        total_break_time = sum(session['total_break_time'] for session in sessions)
         total_days = len(sessions_by_date)
+        first_date = min(sessions_by_date.keys())
+        last_date = max(sessions_by_date.keys())
+        days_span = (last_date - first_date).days + 1
         
-        stats_para = Paragraph(
-            f"Total Study Time: {self._format_time(total_study_time)}<br/>"
-            f"Days Studied: {total_days}<br/>"
-            f"Average Study Time per Day: {self._format_time(total_study_time / max(1, total_days))}", 
-            self.styles['Normal']
-        )
-        story.append(stats_para)
+        # Add key statistics section
+        stats_title = Paragraph("Key Statistics", self.styles['SectionHeader'])
+        story.append(stats_title)
+        
+        stats_data = [
+            ['Metric', 'Value'],
+            ['Total Study Time', self._format_time(total_study_time)],
+            ['Total Break Time', self._format_time(total_break_time)],
+            ['Days Studied', str(total_days)],
+            ['Study Span', f"{days_span} days ({first_date.strftime('%Y-%m-%d')} to {last_date.strftime('%Y-%m-%d')})"],
+            ['Avg. Study Time/Day', self._format_time(total_study_time / max(1, total_days))],
+            ['Total Sessions', str(len(sessions))]
+        ]
+        
+        ratio = "N/A"
+        if total_break_time > 0:
+            study_minutes = int(total_study_time / 60)
+            break_minutes = int(total_break_time / 60)
+            
+            def gcd(a, b):
+                while b:
+                    a, b = b, a % b
+                return a
+            
+            divisor = gcd(study_minutes, break_minutes)
+            if divisor > 0:
+                ratio = f"{study_minutes//divisor}:{break_minutes//divisor}"
+        
+        stats_data.append(['Study:Break Ratio', ratio])
+        
+        stats_table = Table(stats_data, colWidths=[2.5*inch, 2.5*inch])
+        stats_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        story.append(stats_table)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Overall time distribution chart
+        if total_study_time > 0 or total_break_time > 0:
+            chart_title = Paragraph("Overall Time Distribution", self.styles['SectionHeader'])
+            story.append(chart_title)
+            
+            drawing = Drawing(5*inch, 2.5*inch)
+            pie = Pie()
+            pie.x = 2.5*inch
+            pie.y = 1.25*inch
+            pie.width = 2.5*inch
+            pie.height = 2.5*inch
+            pie.data = [total_study_time, total_break_time]
+            pie.labels = ['Study', 'Break']
+            pie.slices.strokeWidth = 0.5
+            pie.slices[0].fillColor = colors.darkblue
+            pie.slices[1].fillColor = colors.lightblue
+            drawing.add(pie)
+            story.append(drawing)
+            
+            # Add legend
+            total_time = total_study_time + total_break_time
+            if total_time > 0:
+                legend = Paragraph(
+                    f"<font color='darkblue'>■</font> Study: {self._format_time(total_study_time)} ({100*total_study_time/total_time:.1f}%)<br/>"
+                    f"<font color='lightblue'>■</font> Break: {self._format_time(total_break_time)} ({100*total_break_time/total_time:.1f}%)",
+                    self.styles['BodyText']
+                )
+                story.append(legend)
+        
         story.append(Spacer(1, 0.3*inch))
         
         # Daily study time chart
-        daily_chart_title = Paragraph("Daily Study Time", self.styles['ReportSubtitle'])
+        daily_chart_title = Paragraph("Daily Study Time", self.styles['SectionHeader'])
         story.append(daily_chart_title)
         
         daily_data = []
@@ -583,18 +889,20 @@ class PDFReportGenerator:
             daily_data.append(day_total)
             daily_labels.append(date.strftime("%m/%d"))
         
-        drawing = Drawing(400, 200)
+        drawing = Drawing(500, 200)
         bc = VerticalBarChart()
         bc.x = 50
         bc.y = 50
         bc.height = 125
-        bc.width = 300
+        bc.width = 400
         bc.data = [daily_data]
         bc.strokeColor = colors.black
+        bc.fillColor = colors.darkblue
         
         bc.valueAxis.valueMin = 0
         bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
         bc.valueAxis.valueStep = 1
+        bc.valueAxis.labelTextFormat = '%0.1f h'
         bc.categoryAxis.labels.boxAnchor = 'ne'
         bc.categoryAxis.labels.dx = 8
         bc.categoryAxis.labels.dy = -2
@@ -606,7 +914,7 @@ class PDFReportGenerator:
         story.append(Spacer(1, 0.3*inch))
         
         # Subject breakdown
-        subject_title = Paragraph("Subject Breakdown", self.styles['ReportSubtitle'])
+        subject_title = Paragraph("Subject Breakdown", self.styles['SectionHeader'])
         story.append(subject_title)
         
         # Group study time by subject
@@ -621,38 +929,93 @@ class PDFReportGenerator:
         subject_data = [['Subject', 'Total Time', 'Percentage']]
         
         for subject, time in sorted(subject_times.items(), key=lambda x: x[1], reverse=True):
-            percentage = (time / total_study_time) * 100
+            percentage = (time / total_study_time) * 100 if total_study_time > 0 else 0
             subject_data.append([
                 subject, 
                 self._format_time(time), 
                 f"{percentage:.1f}%"
             ])
         
-        subject_table = Table(subject_data, colWidths=[2*inch, 1.5*inch, 1*inch])
+        subject_table = Table(subject_data, colWidths=[2.5*inch, 2*inch, 1.5*inch])
         subject_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]))
         
         story.append(subject_table)
         story.append(Spacer(1, 0.3*inch))
         
+        # Subject pie chart
+        if subject_times:
+            drawing = Drawing(500, 250)
+            pie = Pie()
+            pie.x = 250
+            pie.y = 125
+            pie.width = 250
+            pie.height = 250
+            
+            # Get top 5 subjects by time, group others as "Other"
+            top_subjects = sorted(subject_times.items(), key=lambda x: x[1], reverse=True)
+            if len(top_subjects) > 5:
+                data_values = [t[1] for t in top_subjects[:5]]
+                data_labels = [t[0] for t in top_subjects[:5]]
+                
+                other_time = sum(t[1] for t in top_subjects[5:])
+                data_values.append(other_time)
+                data_labels.append('Other')
+            else:
+                data_values = [t[1] for t in top_subjects]
+                data_labels = [t[0] for t in top_subjects]
+            
+            pie.data = data_values
+            pie.labels = data_labels
+            pie.slices.strokeWidth = 0.5
+            
+            # Set a palette of colors
+            colors_palette = [colors.darkblue, colors.blue, colors.lightblue, 
+                             colors.navy, colors.royalblue, colors.skyblue]
+            
+            for i in range(len(data_values)):
+                pie.slices[i].fillColor = colors_palette[i % len(colors_palette)]
+            
+            drawing.add(pie)
+            story.append(drawing)
+            
+            # Add legend
+            legend_text = ""
+            for i, (subject, time) in enumerate(zip(data_labels, data_values)):
+                color = colors_palette[i % len(colors_palette)]
+                percentage = (time / total_study_time) * 100 if total_study_time > 0 else 0
+                hex_color = '#{:02x}{:02x}{:02x}'.format(
+                    int(color.red * 255), 
+                    int(color.green * 255), 
+                    int(color.blue * 255)
+                )
+                legend_text += f"<font color='{hex_color}'>■</font> {subject}: {self._format_time(time)} ({percentage:.1f}%)<br/>"
+            
+            legend = Paragraph(legend_text, self.styles['BodyText'])
+            story.append(legend)
+            story.append(Spacer(1, 0.3*inch))
+        
         # Daily timeline
-        timeline_title = Paragraph("Daily Timeline", self.styles['ReportSubtitle'])
+        timeline_title = Paragraph("Daily Timeline", self.styles['SectionHeader'])
         story.append(timeline_title)
         
         for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
-            date_title = Paragraph(f"{date.strftime('%Y-%m-%d')}", self.styles['Normal'])
+            date_title = Paragraph(f"{date.strftime('%Y-%m-%d')}", self.styles['BodyText'])
             story.append(date_title)
             
             day_total = sum(session['total_study_time'] for session in day_sessions)
             day_stats = Paragraph(
                 f"Total study time: {self._format_time(day_total)}", 
-                self.styles['Normal']
+                self.styles['BodyText']
             )
             story.append(day_stats)
             
@@ -669,14 +1032,17 @@ class PDFReportGenerator:
                     self._format_time(session['total_study_time'])
                 ])
             
-            session_table = Table(session_data, colWidths=[1.25*inch, 1.25*inch, 1.25*inch, 1.25*inch])
+            session_table = Table(session_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
             session_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BOX', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ]))
             
             story.append(session_table)
@@ -692,19 +1058,63 @@ class PDFReportGenerator:
             
             subject_total = subject_times[subject]
             subject_sessions = [s for s in sessions if s['subject'] == subject]
-            subject_percentage = (subject_total / total_study_time) * 100
+            subject_percentage = (subject_total / total_study_time) * 100 if total_study_time > 0 else 0
             
             subject_summary = Paragraph(
                 f"Total Time: {self._format_time(subject_total)}<br/>"
                 f"Percentage of Total Study Time: {subject_percentage:.1f}%<br/>"
                 f"Number of Sessions: {len(subject_sessions)}", 
-                self.styles['Normal']
+                self.styles['BodyText']
             )
             story.append(subject_summary)
             story.append(Spacer(1, 0.3*inch))
             
+            # Daily progress for this subject
+            subject_by_date = {}
+            for session in subject_sessions:
+                date_key = session['start_time'].date()
+                if date_key not in subject_by_date:
+                    subject_by_date[date_key] = 0
+                subject_by_date[date_key] += session['total_study_time']
+            
+            if subject_by_date:
+                daily_subject_title = Paragraph(f"Daily Progress for {subject}", self.styles['SectionHeader'])
+                story.append(daily_subject_title)
+                
+                daily_data = []
+                daily_labels = []
+                
+                for date, time in sorted(subject_by_date.items()):
+                    hours = time / 3600  # Convert to hours
+                    daily_data.append(hours)
+                    daily_labels.append(date.strftime("%m/%d"))
+                
+                drawing = Drawing(500, 200)
+                bc = VerticalBarChart()
+                bc.x = 50
+                bc.y = 50
+                bc.height = 125
+                bc.width = 400
+                bc.data = [daily_data]
+                bc.strokeColor = colors.black
+                bc.fillColor = colors.blue
+                
+                bc.valueAxis.valueMin = 0
+                bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
+                bc.valueAxis.valueStep = 1
+                bc.valueAxis.labelTextFormat = '%0.1f h'
+                bc.categoryAxis.labels.boxAnchor = 'ne'
+                bc.categoryAxis.labels.dx = 8
+                bc.categoryAxis.labels.dy = -2
+                bc.categoryAxis.labels.angle = 30
+                bc.categoryAxis.categoryNames = daily_labels
+                
+                drawing.add(bc)
+                story.append(drawing)
+                story.append(Spacer(1, 0.3*inch))
+            
             # Sessions for this subject
-            sessions_title = Paragraph("Sessions", self.styles['ReportSubtitle'])
+            sessions_title = Paragraph("Sessions", self.styles['SectionHeader'])
             story.append(sessions_title)
             
             if subject_sessions:
@@ -722,30 +1132,33 @@ class PDFReportGenerator:
                         self._format_time(session['total_study_time'])
                     ])
                 
-                subject_session_table = Table(subject_session_data, colWidths=[1.25*inch, 1.25*inch, 1.25*inch, 1.25*inch])
+                subject_session_table = Table(subject_session_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
                 subject_session_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                     ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
                     ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('BOX', (0, 0), (-1, -1), 1, colors.black),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ]))
                 
                 story.append(subject_session_table)
             else:
-                no_sessions = Paragraph("No sessions recorded for this subject.", self.styles['Normal'])
+                no_sessions = Paragraph("No sessions recorded for this subject.", self.styles['BodyText'])
                 story.append(no_sessions)
             
             # Add creator footer to each subject page
             story.append(Spacer(1, 0.5*inch))
-            footer = Paragraph("© Study tracker created by Eli.", self.styles['Footer'])
+            footer = Paragraph("Study tracker created by Eli.", self.styles['Footer'])
             story.append(footer)
         
         # For the main page, add creator footer at the end
         if not subject_times:
             story.append(Spacer(1, 0.5*inch))
-            footer = Paragraph("© Study tracker created by Eli.", self.styles['Footer'])
+            footer = Paragraph("Study tracker created by Eli.", self.styles['Footer'])
             story.append(footer)
         
         # Build PDF
@@ -753,27 +1166,52 @@ class PDFReportGenerator:
         buffer.seek(0)
         return buffer
 
-# ================== SINGLE INSTANCE CHECK ==================def ensure_single_instance():
-    """Ensure only one instance of the bot is running."""
+# ================== SINGLE INSTANCE CHECK ==================
+def ensure_single_instance():
+    """Ensure only one instance of the bot is running with better conflict resolution."""
     try:
+        # First, forcefully clear the bot's webhook if any
+        token = os.getenv('TELEGRAM_BOT_TOKEN')
+        if token:
+            try:
+                webhook_clear_url = f"https://api.telegram.org/bot{token}/deleteWebhook?drop_pending_updates=true"
+                response = requests.get(webhook_clear_url, timeout=10)
+                if response.status_code == 200:
+                    logger.info("Successfully cleared any existing webhook")
+                    # Allow time for webhook clearing to take effect
+                    time.sleep(2)
+                else:
+                    logger.warning(f"Failed to clear webhook: {response.status_code} {response.text}")
+            except Exception as e:
+                logger.error(f"Error clearing webhook: {e}")
+        
         # Check if PID file exists
         if os.path.exists(PID_FILE):
-            with open(PID_FILE, 'r') as f:
-                old_pid = int(f.read().strip())
-            
-            # Check if process with this PID exists and it's our script
             try:
-                # Send signal 0 to check if process exists without actually sending a signal
-                os.kill(old_pid, 0)
+                with open(PID_FILE, 'r') as f:
+                    old_pid = int(f.read().strip())
                 
-                # Process exists
-                logger.warning(f"Another instance is already running with PID {old_pid}. Exiting.")
-                sys.exit(1)
+                # On Render, sometimes the PID file persists after restart
+                # So we need to check if this is a fresh deployment
+                pid_file_age = time.time() - os.path.getmtime(PID_FILE)
                 
-            except OSError:
-                # Process doesn't exist - stale PID file
-                logger.info(f"Stale PID file found. Previous instance (PID {old_pid}) is not running.")
-                # Continue with starting the bot
+                # If file is less than 60 seconds old, assume it's from a concurrent startup
+                if pid_file_age < 60:
+                    logger.warning(f"Recent PID file found ({pid_file_age:.1f}s old). Checking process...")
+                    
+                    try:
+                        # Try to kill the old process directly
+                        os.kill(old_pid, signal.SIGTERM)
+                        logger.info(f"Sent SIGTERM to previous process with PID {old_pid}")
+                        time.sleep(5)  # Give it time to terminate
+                    except OSError:
+                        logger.info(f"No process with PID {old_pid} found, safe to continue")
+                
+                # If PID file is older, it might be stale
+                else:
+                    logger.info(f"Found old PID file ({pid_file_age:.1f}s old). Assuming stale.")
+            except Exception as e:
+                logger.error(f"Error processing existing PID file: {e}")
         
         # Write our PID to the file
         with open(PID_FILE, 'w') as f:
@@ -792,7 +1230,7 @@ class PDFReportGenerator:
         atexit.register(cleanup_pid_file)
         
     except Exception as e:
-        logger.error(f"Error checking/creating PID file: {e}")
+        logger.error(f"Error in single instance check: {e}")
 
 # ================== RESOURCE MONITOR ==================
 class ResourceMonitor:
@@ -1091,6 +1529,8 @@ class StudySession:
             return a
         
         divisor = gcd(study_minutes, break_minutes)
+        if divisor == 0:  # Avoid division by zero
+            return f"{study_minutes}:{break_minutes}"
         return f"{study_minutes//divisor}:{break_minutes//divisor}"
 
     def get_progress_percentage(self) -> int:
@@ -1791,7 +2231,7 @@ class TelegramBot:
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            "Generating your session report... 📊",
+            "Generating your session report... Please wait...",
             should_delete=True
         )
         
@@ -1804,7 +2244,19 @@ class TelegramBot:
                 chat_id=update.effective_chat.id,
                 document=pdf_buffer,
                 filename=f"Session Report - {user_name}, RMT.pdf",
-                caption=f"📊 Here's your session report, {user_name}!"
+                caption=f"Here's your session report, {user_name}!"
+            )
+            
+            # Delete the PDF generation message
+            buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
+            reply_markup = InlineKeyboardMarkup(buttons)
+            
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Ready to start another study session?",
+                reply_markup=reply_markup,
+                should_delete=True
             )
             
         except Exception as e:
@@ -1838,7 +2290,7 @@ class TelegramBot:
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            "Generating your daily study report... 📊",
+            "Generating your daily study report... Please wait...",
             should_delete=True
         )
         
@@ -1863,7 +2315,19 @@ class TelegramBot:
                 chat_id=update.effective_chat.id,
                 document=pdf_buffer,
                 filename=f"Daily Study Report {today.strftime('%Y-%m-%d')} - {user_name}, RMT.pdf",
-                caption=f"📊 Here's your daily study report, {user_name}!"
+                caption=f"Here's your daily study report, {user_name}!"
+            )
+            
+            # Delete the PDF generation message
+            buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
+            reply_markup = InlineKeyboardMarkup(buttons)
+            
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Ready to start another study session?",
+                reply_markup=reply_markup,
+                should_delete=True
             )
             
         except Exception as e:
@@ -1898,7 +2362,7 @@ class TelegramBot:
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            "Generating your overall study progress report... 📊",
+            "Generating your overall study progress report... Please wait...",
             should_delete=True
         )
         
@@ -1923,7 +2387,19 @@ class TelegramBot:
                 chat_id=update.effective_chat.id,
                 document=pdf_buffer,
                 filename=f"Study Progress Report of {user_name}, RMT.pdf",
-                caption=f"📊 Here's your complete study progress report, {user_name}!"
+                caption=f"Here's your complete study progress report, {user_name}!"
+            )
+            
+            # Show start studying button
+            buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
+            reply_markup = InlineKeyboardMarkup(buttons)
+            
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Ready to start another study session?",
+                reply_markup=reply_markup,
+                should_delete=True
             )
             
             return CHOOSING_MAIN_MENU
@@ -1959,7 +2435,7 @@ class TelegramBot:
         await self.send_bot_message(
             context,
             update.effective_chat.id,
-            "Generating your study report for today... 📋",
+            "Generating your study report for today... Please wait...",
             should_delete=True
         )
         
@@ -1987,7 +2463,19 @@ class TelegramBot:
                 chat_id=update.effective_chat.id,
                 document=pdf_buffer,
                 filename=f"Daily Study Report {today.strftime('%Y-%m-%d')} - {user_name}, RMT.pdf",
-                caption=f"📋 Here's your study report for today, {user_name}!"
+                caption=f"Here's your study report for today, {user_name}!"
+            )
+            
+            # Show start studying button
+            buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
+            reply_markup = InlineKeyboardMarkup(buttons)
+            
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Ready to start another study session?",
+                reply_markup=reply_markup,
+                should_delete=True
             )
             
             return CHOOSING_MAIN_MENU
@@ -2083,6 +2571,34 @@ def self_ping():
     except Exception as e:
         logger.warning(f"Self-ping failed: {e}")
 
+# ================== FORCE CLEAR UPDATES ==================
+async def force_clear_telegram_updates(token):
+    """Force clear any pending updates from Telegram."""
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            # First try to get current update_id
+            url = f"https://api.telegram.org/bot{token}/getUpdates?limit=1"
+            async with session.get(url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    updates = data.get('result', [])
+                    if updates:
+                        next_update = updates[0]['update_id'] + 1
+                        # Clear all updates by setting offset
+                        clear_url = f"https://api.telegram.org/bot{token}/getUpdates?offset={next_update}"
+                        async with session.get(clear_url, timeout=10) as clear_response:
+                            if clear_response.status == 200:
+                                logger.info("Successfully cleared pending updates")
+                            else:
+                                logger.warning(f"Failed to clear updates: {await clear_response.text()}")
+                    else:
+                        logger.info("No pending updates to clear")
+                else:
+                    logger.warning(f"Failed to get updates: {await response.text()}")
+    except Exception as e:
+        logger.error(f"Error in force_clear_updates: {e}")
+
 # ================== RELIABILITY IMPROVEMENTS ==================
 async def run_bot_with_retries():
     """Run the bot with automatic retries and permanent operation"""
@@ -2103,6 +2619,9 @@ async def run_bot_with_retries():
             if not token:
                 logger.error("No TELEGRAM_BOT_TOKEN provided in environment variables")
                 sys.exit(1)
+            
+            # First forcefully delete any existing webhook and clear updates
+            await force_clear_telegram_updates(token)
             
             # Make sure persistence directory exists
             persistence_dir = os.path.dirname(PERSISTENCE_PATH)
@@ -2196,7 +2715,6 @@ async def run_bot_with_retries():
                 fallbacks=[
                     CallbackQueryHandler(telegram_bot.cancel_operation, pattern='^cancel_operation$')
                 ],
-                per_message=False,
                 per_chat=True,
                 name="main_conversation",
                 persistent=True if persistence else False  # Enable persistence only if available
