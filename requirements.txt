@@ -12,3 +12,4 @@ google-api-python-client>=2.79.0  # For Google Drive API
 google-auth>=2.15.0  # Google authentication
 google-auth-httplib2>=0.1.0  # Google auth HTTP library
 google-auth-oauthlib>=0.8.0  # Google OAuth
+aiohttp>=3.8.0  # For async HTTP requests (used in force_clear_telegram_updates)
