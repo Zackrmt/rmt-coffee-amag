@@ -546,10 +546,10 @@ class PDFReportGenerator:
             story.append(chart_title)
             
             # Create pie chart for study vs break time
-            drawing = Drawing(3*inch, 1.5*inch)
+            drawing = Drawing(3*inch, 1.8*inch)  # Increased height
             pie = Pie()
             pie.x = 1.5*inch
-            pie.y = 0.75*inch
+            pie.y = 0.9*inch  # Increased y position
             pie.width = 1.5*inch
             pie.height = 1.5*inch
             
@@ -572,6 +572,7 @@ class PDFReportGenerator:
                     self.styles['RMT_SmallText']
                 )
                 story.append(legend)
+                story.append(Spacer(1, 0.2*inch))  # Added extra spacing
         
         # Add creator footer
         story.append(Spacer(1, 0.3*inch))
@@ -653,10 +654,10 @@ class PDFReportGenerator:
             story.append(chart_title)
             
             if total_study_time > 0 or total_break_time > 0:
-                drawing = Drawing(4*inch, 2*inch)
+                drawing = Drawing(4*inch, 2.5*inch)  # Increased height
                 pie = Pie()
                 pie.x = 2*inch
-                pie.y = 1*inch
+                pie.y = 1.25*inch  # Increased y position
                 pie.width = 2*inch
                 pie.height = 2*inch
                 pie.data = [total_study_time, total_break_time]
@@ -676,8 +677,9 @@ class PDFReportGenerator:
                         self.styles['RMT_BodyText']
                     )
                     story.append(legend)
-            
-            story.append(Spacer(1, 0.3*inch))
+                    
+                # Add extra spacing after the chart
+                story.append(Spacer(1, 0.5*inch))  # Increased spacing
             
             # Subject breakdown
             sessions_by_subject = {}
@@ -851,10 +853,10 @@ class PDFReportGenerator:
             chart_title = Paragraph("Overall Time Distribution", self.styles['RMT_SectionHeader'])
             story.append(chart_title)
             
-            drawing = Drawing(5*inch, 2.5*inch)
+            drawing = Drawing(5*inch, 3*inch)  # Increased height
             pie = Pie()
             pie.x = 2.5*inch
-            pie.y = 1.25*inch
+            pie.y = 1.5*inch  # Increased y position
             pie.width = 2.5*inch
             pie.height = 2.5*inch
             pie.data = [total_study_time, total_break_time]
@@ -874,8 +876,9 @@ class PDFReportGenerator:
                     self.styles['RMT_BodyText']
                 )
                 story.append(legend)
-        
-        story.append(Spacer(1, 0.3*inch))
+                
+            # Add extra spacing after the chart
+            story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
         # Daily study time chart
         daily_chart_title = Paragraph("Daily Study Time", self.styles['RMT_SectionHeader'])
@@ -911,7 +914,7 @@ class PDFReportGenerator:
         
         drawing.add(bc)
         story.append(drawing)
-        story.append(Spacer(1, 0.3*inch))
+        story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
         # Subject breakdown
         subject_title = Paragraph("Subject Breakdown", self.styles['RMT_SectionHeader'])
@@ -950,14 +953,21 @@ class PDFReportGenerator:
         ]))
         
         story.append(subject_table)
-        story.append(Spacer(1, 0.3*inch))
+        story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
         # Subject pie chart
         if subject_times:
-            drawing = Drawing(500, 250)
+            # Add a page break before the subject pie chart to avoid overlapping
+            story.append(PageBreak())
+            
+            # Restart with the subject breakdown title
+            subject_pie_title = Paragraph("Subject Distribution", self.styles['RMT_SectionHeader'])
+            story.append(subject_pie_title)
+            
+            drawing = Drawing(500, 300)  # Increased height
             pie = Pie()
             pie.x = 250
-            pie.y = 125
+            pie.y = 150  # Increased y position
             pie.width = 250
             pie.height = 250
             
@@ -1002,7 +1012,7 @@ class PDFReportGenerator:
             
             legend = Paragraph(legend_text, self.styles['RMT_BodyText'])
             story.append(legend)
-            story.append(Spacer(1, 0.3*inch))
+            story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
         # Daily timeline
         timeline_title = Paragraph("Daily Timeline", self.styles['RMT_SectionHeader'])
@@ -1046,7 +1056,7 @@ class PDFReportGenerator:
             ]))
             
             story.append(session_table)
-            story.append(Spacer(1, 0.2*inch))
+            story.append(Spacer(1, 0.3*inch))
         
         # Subject detail pages
         for subject in sorted(subject_times.keys()):
@@ -1111,7 +1121,7 @@ class PDFReportGenerator:
                 
                 drawing.add(bc)
                 story.append(drawing)
-                story.append(Spacer(1, 0.3*inch))
+                story.append(Spacer(1, 0.5*inch))  # Increased spacing
             
             # Sessions for this subject
             sessions_title = Paragraph("Sessions", self.styles['RMT_SectionHeader'])
@@ -1605,6 +1615,64 @@ class TelegramBot:
         
         # Initialize Google Drive DB
         self.db.initialize()
+
+    async def reset_user_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Reset/delete user data from the database."""
+        self.record_activity()
+        user = update.effective_user
+        user_id = user.id
+        
+        # Check if the user has data in the database
+        user_data = self.db.load_user_data(user_id)
+        if not user_data:
+            await update.message.reply_text("You don't have any stored data to reset.")
+            return
+        
+        # Create confirmation buttons
+        buttons = [
+            [
+                InlineKeyboardButton("Yes, delete my data ✅", callback_data='confirm_reset_data'),
+                InlineKeyboardButton("No, keep my data ❌", callback_data='cancel_reset_data')
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(buttons)
+        
+        # Store the thread_id if the message is in a topic
+        if update.message and update.message.is_topic_message:
+            context.user_data['thread_id'] = update.message.message_thread_id
+        
+        await update.message.reply_text(
+            "⚠️ WARNING: This will permanently delete all your study session data. Are you sure?",
+            reply_markup=reply_markup
+        )
+    
+    async def handle_reset_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the data reset confirmation."""
+        self.record_activity()
+        query = update.callback_query
+        await query.answer()
+        
+        # Check if we're in a topic/thread
+        if update.callback_query.message and update.callback_query.message.is_topic_message:
+            # Update the thread_id in user_data
+            context.user_data['thread_id'] = update.callback_query.message.message_thread_id
+        
+        if query.data == 'confirm_reset_data':
+            user_id = update.effective_user.id
+            
+            # Create an empty data structure and save it to overwrite existing data
+            empty_data = {
+                'user_name': update.effective_user.first_name or update.effective_user.username or "User",
+                'sessions': []
+            }
+            success = self.db.save_user_data(user_id, empty_data)
+            
+            if success:
+                await query.edit_message_text("✅ All your study data has been reset successfully.")
+            else:
+                await query.edit_message_text("❌ There was an error resetting your data. Please try again later.")
+        else:  # cancel_reset_data
+            await query.edit_message_text("Operation cancelled. Your data remains unchanged.")
 
     async def cleanup_all_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clean up ALL messages including those marked to keep."""
@@ -2771,6 +2839,11 @@ async def run_bot_with_retries():
             application.add_handler(CommandHandler('start', telegram_bot.start))
             application.add_handler(CommandHandler('MYSTUDYdownload', telegram_bot.generate_overall_progress_report))
             application.add_handler(CommandHandler('MYSTUDYtoday', telegram_bot.generate_today_report))
+            application.add_handler(CommandHandler('reset_mydata', telegram_bot.reset_user_data))
+            
+            # Add reset data confirmation handlers
+            application.add_handler(CallbackQueryHandler(telegram_bot.handle_reset_confirmation, pattern='^confirm_reset_data$'))
+            application.add_handler(CallbackQueryHandler(telegram_bot.handle_reset_confirmation, pattern='^cancel_reset_data$'))
             
             conv_handler = ConversationHandler(
                 entry_points=[
