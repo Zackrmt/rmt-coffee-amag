@@ -344,23 +344,34 @@ class GoogleDriveDB:
         try:
             data = self.load_user_data(user_id)
             if not data or 'sessions' not in data:
+                logger.info(f"No sessions found for user {user_id}")
                 return []
                 
             sessions = data['sessions']
+            logger.info(f"Loaded {len(sessions)} raw sessions for user {user_id}")
             
             # Convert ISO dates to datetime objects
             for session in sessions:
                 try:
-                    session['start_time'] = datetime.datetime.fromisoformat(session['start_time'])
-                    if session['end_time']:
+                    # Check if start_time is already a datetime object
+                    if isinstance(session['start_time'], str):
+                        session['start_time'] = datetime.datetime.fromisoformat(session['start_time'])
+                    
+                    # Check if end_time exists and is a string
+                    if session['end_time'] and isinstance(session['end_time'], str):
                         session['end_time'] = datetime.datetime.fromisoformat(session['end_time'])
                     
-                    for break_period in session['break_periods']:
-                        break_period['start'] = datetime.datetime.fromisoformat(break_period['start'])
-                        break_period['end'] = datetime.datetime.fromisoformat(break_period['end'])
+                    # Process break periods only if they exist and are in string format
+                    for break_period in session.get('break_periods', []):
+                        if isinstance(break_period.get('start'), str):
+                            break_period['start'] = datetime.datetime.fromisoformat(break_period['start'])
+                        if isinstance(break_period.get('end'), str):
+                            break_period['end'] = datetime.datetime.fromisoformat(break_period['end'])
                 except Exception as e:
                     logger.error(f"Error parsing session dates: {e}")
+                    logger.error(f"Problematic session data: {session}")
                     
+            logger.info(f"Successfully processed {len(sessions)} sessions for user {user_id}")
             return sessions
         except Exception as e:
             logger.error(f"Error getting user study sessions: {e}")
@@ -370,16 +381,35 @@ class GoogleDriveDB:
         """Get study sessions for a specific date."""
         all_sessions = self.get_user_study_sessions(user_id)
         
+        # Debug logging
+        logger.info(f"Looking for sessions on date: {date} for user {user_id}")
+        logger.info(f"Total sessions found: {len(all_sessions)}")
+        
         # Filter sessions for the specific date
         date_sessions = []
         for session in all_sessions:
-            session_date = session['start_time'].date()
-            if session_date == date:
-                date_sessions.append(session)
+            try:
+                # Handle case where start_time might not be a datetime object yet
+                if isinstance(session['start_time'], str):
+                    session['start_time'] = datetime.datetime.fromisoformat(session['start_time'])
+                    
+                # Convert to Manila timezone for comparison
+                manila_time = session['start_time'].astimezone(MANILA_TZ)
+                session_date = manila_time.date()
                 
+                logger.info(f"Session date: {session_date}, comparing with: {date}")
+                
+                if session_date == date:
+                    date_sessions.append(session)
+                    logger.info(f"Match found for session starting at {manila_time}")
+            except Exception as e:
+                logger.error(f"Error processing session during date filtering: {e}")
+                # Log the session data for debugging
+                logger.error(f"Problematic session data: {session}")
+        
+        logger.info(f"Found {len(date_sessions)} sessions for date {date}")
         return date_sessions
-
-# ================== PDF REPORT GENERATOR ==================
+    
 # ================== PDF REPORT GENERATOR ==================
 class PDFReportGenerator:
     def __init__(self):
@@ -2749,23 +2779,34 @@ class TelegramBot:
             "Generating your study report for today... Please wait...",
             should_delete=True
         )
-                
+        
         try:
             # Get today's date in Manila timezone
             today = datetime.datetime.now(MANILA_TZ).date()
+            logger.info(f"Today's date in Manila: {today}")
             
+            # Get all sessions for debugging
+            all_sessions = self.db.get_user_study_sessions(user.id)
+            logger.info(f"User has {len(all_sessions)} total sessions")
+            
+            # Debug: Print all session dates
+            for idx, session in enumerate(all_sessions):
+                try:
+                    # Make sure start_time is a datetime
+                    if isinstance(session['start_time'], str):
+                        session['start_time'] = datetime.datetime.fromisoformat(session['start_time'])
+                        
+                    manila_time = session['start_time'].astimezone(MANILA_TZ)
+                    logger.info(f"Session {idx}: {manila_time.date()}")
+                except Exception as e:
+                    logger.error(f"Error examining session {idx}: {e}")
+                    
             # Get study sessions for today
             today_sessions = self.db.get_sessions_for_date(user.id, today)
             
-            # Log sessions count for debugging
             logger.info(f"Found {len(today_sessions)} sessions for user {user.id} on {today}")
             
             if not today_sessions:
-                # Check if there are any sessions at all
-                all_sessions = self.db.get_user_study_sessions(user.id)
-                if all_sessions:
-                    logger.info(f"User has {len(all_sessions)} sessions in total, but none for today {today}")
-                    
                 await self.send_bot_message(
                     context,
                     update.effective_chat.id,
@@ -2773,7 +2814,7 @@ class TelegramBot:
                     should_delete=True
                 )
                 return CHOOSING_MAIN_MENU
-        
+            
             # Generate PDF
             pdf_buffer = self.pdf_generator.generate_daily_report(user_name, today, today_sessions)
             
@@ -2802,6 +2843,8 @@ class TelegramBot:
             
         except Exception as e:
             logger.error(f"Error generating today's report: {e}")
+            import traceback
+            logger.error(traceback.format_exc())  # Print full traceback
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
@@ -2809,7 +2852,7 @@ class TelegramBot:
                 should_delete=True
             )
             return CHOOSING_MAIN_MENU
-
+        
     async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Show cancel confirmation dialog."""
         self.record_activity()
