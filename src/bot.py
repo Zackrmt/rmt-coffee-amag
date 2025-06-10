@@ -1606,6 +1606,41 @@ class TelegramBot:
         # Initialize Google Drive DB
         self.db.initialize()
 
+    async def send_document(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+        chat_id: int,
+        document,
+        filename: str,
+        caption: str = None,
+        should_delete: bool = False
+    ):
+        """Send a document with proper thread ID handling."""
+        self.record_activity()
+        
+        # Get thread_id from user_data if available
+        thread_id = None
+        if 'thread_id' in context.user_data:
+            thread_id = context.user_data['thread_id']
+        elif context.user_data.get('current_thread_id'):
+            thread_id = context.user_data['current_thread_id']
+        
+        # Send the document with thread_id if in a topic
+        message = await context.bot.send_document(
+            chat_id=chat_id,
+            document=document,
+            filename=filename,
+            caption=caption,
+            message_thread_id=thread_id
+        )
+        
+        if should_delete:
+            if 'messages_to_delete' not in context.user_data:
+                context.user_data['messages_to_delete'] = []
+            context.user_data['messages_to_delete'].append(message.message_id)
+        
+        return message.message_id
+
     async def cleanup_all_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clean up ALL messages including those marked to keep."""
         messages_to_delete = context.user_data.get('messages_to_delete', [])
