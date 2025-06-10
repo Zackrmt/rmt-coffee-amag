@@ -384,9 +384,9 @@ class PDFReportGenerator:
     def __init__(self):
         self.styles = getSampleStyleSheet()
         
-        # Create custom styles with professional appearance
+        # Create custom styles with professional appearance and UNIQUE names
         self.styles.add(ParagraphStyle(
-            name='ReportTitle',
+            name='RMT_ReportTitle',  # Changed from 'ReportTitle' to 'RMT_ReportTitle'
             parent=self.styles['Heading1'],
             fontSize=16,
             alignment=1,  # Center
@@ -396,7 +396,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='ReportSubtitle',
+            name='RMT_ReportSubtitle',  # Changed from 'ReportSubtitle' to 'RMT_ReportSubtitle'
             parent=self.styles['Heading2'],
             fontSize=14,
             alignment=1,
@@ -406,7 +406,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='BodyText',  # Custom name to avoid conflicts
+            name='RMT_BodyText',  # Changed from 'BodyText' to 'RMT_BodyText'
             parent=self.styles['Normal'],
             fontSize=10,
             spaceAfter=8,
@@ -415,7 +415,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='SmallText',
+            name='RMT_SmallText',  # Changed from 'SmallText' to 'RMT_SmallText'
             parent=self.styles['Normal'],
             fontSize=8,
             spaceAfter=6,
@@ -424,7 +424,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='Footer',
+            name='RMT_Footer',  # Changed from 'Footer' to 'RMT_Footer'
             parent=self.styles['Normal'],
             fontSize=8,
             alignment=1,  # Center
@@ -432,7 +432,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='TableHeader',
+            name='RMT_TableHeader',  # Changed from 'TableHeader' to 'RMT_TableHeader'
             parent=self.styles['Normal'],
             fontSize=10,
             alignment=1,
@@ -442,7 +442,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='SectionHeader',
+            name='RMT_SectionHeader',  # Changed from 'SectionHeader' to 'RMT_SectionHeader'
             parent=self.styles['Heading3'],
             fontSize=12,
             fontName='Helvetica-Bold',
@@ -450,7 +450,7 @@ class PDFReportGenerator:
             spaceAfter=6,
             spaceBefore=12
         ))
-        
+
     def _format_time(self, seconds):
         """Format seconds into hours and minutes."""
         hours = int(seconds // 3600)
