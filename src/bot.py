@@ -549,7 +549,7 @@ class PDFReportGenerator:
             drawing = Drawing(3*inch, 1.8*inch)  # Increased height
             pie = Pie()
             pie.x = 1.5*inch
-            pie.y = 0.9*inch  # Increased y position
+            pie.y = 0.9*inch  # Adjusted y position for better centering
             pie.width = 1.5*inch
             pie.height = 1.5*inch
             
@@ -654,10 +654,16 @@ class PDFReportGenerator:
             story.append(chart_title)
             
             if total_study_time > 0 or total_break_time > 0:
+                # Add page break to put chart on a new page
+                story.append(PageBreak())
+                # Re-add the chart title on the new page
+                chart_title = Paragraph("Time Distribution", self.styles['RMT_SectionHeader'])
+                story.append(chart_title)
+                
                 drawing = Drawing(4*inch, 2.5*inch)  # Increased height
                 pie = Pie()
                 pie.x = 2*inch
-                pie.y = 1.25*inch  # Increased y position
+                pie.y = 1.25*inch  # Adjusted y position
                 pie.width = 2*inch
                 pie.height = 2*inch
                 pie.data = [total_study_time, total_break_time]
@@ -681,16 +687,18 @@ class PDFReportGenerator:
                 # Add extra spacing after the chart
                 story.append(Spacer(1, 0.5*inch))  # Increased spacing
             
-            # Subject breakdown
+            # Subject breakdown - put on a new page
+            story.append(PageBreak())
+            subject_title = Paragraph("Subject Breakdown", self.styles['RMT_SectionHeader'])
+            story.append(subject_title)
+            
+            # Group sessions by subject
             sessions_by_subject = {}
             for session in sessions:
                 subject = session['subject']
                 if subject not in sessions_by_subject:
                     sessions_by_subject[subject] = 0
                 sessions_by_subject[subject] += session['total_study_time']
-            
-            subject_title = Paragraph("Subject Breakdown", self.styles['RMT_SectionHeader'])
-            story.append(subject_title)
             
             if sessions_by_subject:
                 subject_data = [['Subject', 'Time', 'Percentage']]
@@ -719,7 +727,8 @@ class PDFReportGenerator:
             
             story.append(Spacer(1, 0.3*inch))
             
-            # Session details
+            # Session details - add to a new page
+            story.append(PageBreak())
             session_title = Paragraph("Session Details", self.styles['RMT_SectionHeader'])
             story.append(session_title)
             
@@ -848,15 +857,16 @@ class PDFReportGenerator:
         story.append(stats_table)
         story.append(Spacer(1, 0.3*inch))
         
-        # Overall time distribution chart
+        # Overall time distribution chart - put on a new page
+        story.append(PageBreak())
+        chart_title = Paragraph("Overall Time Distribution", self.styles['RMT_SectionHeader'])
+        story.append(chart_title)
+        
         if total_study_time > 0 or total_break_time > 0:
-            chart_title = Paragraph("Overall Time Distribution", self.styles['RMT_SectionHeader'])
-            story.append(chart_title)
-            
             drawing = Drawing(5*inch, 3*inch)  # Increased height
             pie = Pie()
             pie.x = 2.5*inch
-            pie.y = 1.5*inch  # Increased y position
+            pie.y = 1.5*inch  # Adjusted y position
             pie.width = 2.5*inch
             pie.height = 2.5*inch
             pie.data = [total_study_time, total_break_time]
@@ -880,7 +890,8 @@ class PDFReportGenerator:
             # Add extra spacing after the chart
             story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
-        # Daily study time chart
+        # Daily study time chart - add to a new page
+        story.append(PageBreak())
         daily_chart_title = Paragraph("Daily Study Time", self.styles['RMT_SectionHeader'])
         story.append(daily_chart_title)
         
@@ -916,7 +927,8 @@ class PDFReportGenerator:
         story.append(drawing)
         story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
-        # Subject breakdown
+        # Subject breakdown - add to a new page
+        story.append(PageBreak())
         subject_title = Paragraph("Subject Breakdown", self.styles['RMT_SectionHeader'])
         story.append(subject_title)
         
@@ -955,19 +967,16 @@ class PDFReportGenerator:
         story.append(subject_table)
         story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
-        # Subject pie chart
-        if subject_times:
-            # Add a page break before the subject pie chart to avoid overlapping
-            story.append(PageBreak())
-            
-            # Restart with the subject breakdown title
+        # Subject pie chart - already on a new page
+        if subject_times:            
+            # Subject distribution title 
             subject_pie_title = Paragraph("Subject Distribution", self.styles['RMT_SectionHeader'])
             story.append(subject_pie_title)
             
             drawing = Drawing(500, 300)  # Increased height
             pie = Pie()
             pie.x = 250
-            pie.y = 150  # Increased y position
+            pie.y = 150  # Adjusted y position
             pie.width = 250
             pie.height = 250
             
@@ -1014,7 +1023,8 @@ class PDFReportGenerator:
             story.append(legend)
             story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
-        # Daily timeline
+        # Daily timeline - IMPORTANT: Add to a new page
+        story.append(PageBreak())
         timeline_title = Paragraph("Daily Timeline", self.styles['RMT_SectionHeader'])
         story.append(timeline_title)
         
@@ -1058,7 +1068,7 @@ class PDFReportGenerator:
             story.append(session_table)
             story.append(Spacer(1, 0.3*inch))
         
-        # Subject detail pages
+        # Subject detail pages - add each to a new page
         for subject in sorted(subject_times.keys()):
             story.append(PageBreak())
             
