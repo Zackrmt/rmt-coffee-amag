@@ -386,7 +386,7 @@ class PDFReportGenerator:
         
         # Create custom styles with professional appearance and UNIQUE names
         self.styles.add(ParagraphStyle(
-            name='RMT_ReportTitle',  # Changed from 'ReportTitle' to 'RMT_ReportTitle'
+            name='RMT_ReportTitle',
             parent=self.styles['Heading1'],
             fontSize=16,
             alignment=1,  # Center
@@ -396,7 +396,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='RMT_ReportSubtitle',  # Changed from 'ReportSubtitle' to 'RMT_ReportSubtitle'
+            name='RMT_ReportSubtitle',
             parent=self.styles['Heading2'],
             fontSize=14,
             alignment=1,
@@ -406,7 +406,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='RMT_BodyText',  # Changed from 'BodyText' to 'RMT_BodyText'
+            name='RMT_BodyText',
             parent=self.styles['Normal'],
             fontSize=10,
             spaceAfter=8,
@@ -415,7 +415,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='RMT_SmallText',  # Changed from 'SmallText' to 'RMT_SmallText'
+            name='RMT_SmallText',
             parent=self.styles['Normal'],
             fontSize=8,
             spaceAfter=6,
@@ -424,7 +424,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='RMT_Footer',  # Changed from 'Footer' to 'RMT_Footer'
+            name='RMT_Footer',
             parent=self.styles['Normal'],
             fontSize=8,
             alignment=1,  # Center
@@ -432,7 +432,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='RMT_TableHeader',  # Changed from 'TableHeader' to 'RMT_TableHeader'
+            name='RMT_TableHeader',
             parent=self.styles['Normal'],
             fontSize=10,
             alignment=1,
@@ -442,7 +442,7 @@ class PDFReportGenerator:
         ))
         
         self.styles.add(ParagraphStyle(
-            name='RMT_SectionHeader',  # Changed from 'SectionHeader' to 'RMT_SectionHeader'
+            name='RMT_SectionHeader',
             parent=self.styles['Heading3'],
             fontSize=12,
             fontName='Helvetica-Bold',
@@ -450,7 +450,7 @@ class PDFReportGenerator:
             spaceAfter=6,
             spaceBefore=12
         ))
-
+        
     def _format_time(self, seconds):
         """Format seconds into hours and minutes."""
         hours = int(seconds // 3600)
@@ -465,23 +465,23 @@ class PDFReportGenerator:
         story = []
         
         # Title
-        title = Paragraph(f"Study Session Report", self.styles['ReportTitle'])
+        title = Paragraph(f"Study Session Report", self.styles['RMT_ReportTitle'])
         story.append(title)
         
         # User
-        user_subtitle = Paragraph(f"{user_name}, RMT", self.styles['ReportSubtitle'])
+        user_subtitle = Paragraph(f"{user_name}, RMT", self.styles['RMT_ReportSubtitle'])
         story.append(user_subtitle)
         story.append(Spacer(1, 0.2*inch))
         
         # Session details
-        subject = Paragraph(f"Subject: {session['subject']}", self.styles['BodyText'])
+        subject = Paragraph(f"Subject: {session['subject']}", self.styles['RMT_BodyText'])
         story.append(subject)
         
         # Format times for display
         start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
         end_time = session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p') if session['end_time'] else "Ongoing"
         
-        times = Paragraph(f"Started: {start_time}<br/>Ended: {end_time}", self.styles['BodyText'])
+        times = Paragraph(f"Started: {start_time}<br/>Ended: {end_time}", self.styles['RMT_BodyText'])
         story.append(times)
         
         # Key statistics
@@ -512,7 +512,7 @@ class PDFReportGenerator:
         # Break details if any
         if session['break_periods']:
             story.append(Spacer(1, 0.3*inch))
-            breaks_title = Paragraph("Break Details:", self.styles['SectionHeader'])
+            breaks_title = Paragraph("Break Details:", self.styles['RMT_SectionHeader'])
             story.append(breaks_title)
             
             break_data = [['#', 'Start', 'End', 'Duration']]
@@ -542,7 +542,7 @@ class PDFReportGenerator:
         # Add productivity chart if session has ended
         if session['end_time']:
             story.append(Spacer(1, 0.3*inch))
-            chart_title = Paragraph("Time Distribution", self.styles['SectionHeader'])
+            chart_title = Paragraph("Time Distribution", self.styles['RMT_SectionHeader'])
             story.append(chart_title)
             
             # Create pie chart for study vs break time
@@ -569,13 +569,13 @@ class PDFReportGenerator:
                 legend = Paragraph(
                     f"<font color='darkblue'>■</font> Study: {self._format_time(study_time)} ({100*study_time/(study_time+break_time):.1f}%)<br/>"
                     f"<font color='lightblue'>■</font> Break: {self._format_time(break_time)} ({100*break_time/(study_time+break_time):.1f}%)",
-                    self.styles['SmallText']
+                    self.styles['RMT_SmallText']
                 )
                 story.append(legend)
         
         # Add creator footer
         story.append(Spacer(1, 0.3*inch))
-        footer = Paragraph("Study tracker created by Eli.", self.styles['Footer'])
+        footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
         story.append(footer)
         
         # Build PDF
@@ -591,23 +591,23 @@ class PDFReportGenerator:
         story = []
         
         # Title
-        title = Paragraph(f"Daily Study Report", self.styles['ReportTitle'])
+        title = Paragraph(f"Daily Study Report", self.styles['RMT_ReportTitle'])
         story.append(title)
         
         # User and Date
-        user_date = Paragraph(f"{user_name}, RMT<br/>{date.strftime('%Y-%m-%d')}", self.styles['ReportSubtitle'])
+        user_date = Paragraph(f"{user_name}, RMT<br/>{date.strftime('%Y-%m-%d')}", self.styles['RMT_ReportSubtitle'])
         story.append(user_date)
         story.append(Spacer(1, 0.3*inch))
         
         if not sessions:
-            no_data = Paragraph("No study sessions recorded for this date.", self.styles['BodyText'])
+            no_data = Paragraph("No study sessions recorded for this date.", self.styles['RMT_BodyText'])
             story.append(no_data)
         else:
             # Summary statistics
             total_study_time = sum(session['total_study_time'] for session in sessions)
             total_break_time = sum(session['total_break_time'] for session in sessions)
             
-            stats_title = Paragraph("Summary Statistics", self.styles['SectionHeader'])
+            stats_title = Paragraph("Summary Statistics", self.styles['RMT_SectionHeader'])
             story.append(stats_title)
             
             stats_data = [
@@ -649,7 +649,7 @@ class PDFReportGenerator:
             story.append(Spacer(1, 0.3*inch))
             
             # Time distribution chart
-            chart_title = Paragraph("Time Distribution", self.styles['SectionHeader'])
+            chart_title = Paragraph("Time Distribution", self.styles['RMT_SectionHeader'])
             story.append(chart_title)
             
             if total_study_time > 0 or total_break_time > 0:
@@ -673,7 +673,7 @@ class PDFReportGenerator:
                     legend = Paragraph(
                         f"<font color='darkblue'>■</font> Study: {self._format_time(total_study_time)} ({100*total_study_time/total_time:.1f}%)<br/>"
                         f"<font color='lightblue'>■</font> Break: {self._format_time(total_break_time)} ({100*total_break_time/total_time:.1f}%)",
-                        self.styles['BodyText']
+                        self.styles['RMT_BodyText']
                     )
                     story.append(legend)
             
@@ -687,7 +687,7 @@ class PDFReportGenerator:
                     sessions_by_subject[subject] = 0
                 sessions_by_subject[subject] += session['total_study_time']
             
-            subject_title = Paragraph("Subject Breakdown", self.styles['SectionHeader'])
+            subject_title = Paragraph("Subject Breakdown", self.styles['RMT_SectionHeader'])
             story.append(subject_title)
             
             if sessions_by_subject:
@@ -718,7 +718,7 @@ class PDFReportGenerator:
             story.append(Spacer(1, 0.3*inch))
             
             # Session details
-            session_title = Paragraph("Session Details", self.styles['SectionHeader'])
+            session_title = Paragraph("Session Details", self.styles['RMT_SectionHeader'])
             story.append(session_title)
             
             session_data = [['Subject', 'Start', 'End', 'Duration']]
@@ -750,7 +750,7 @@ class PDFReportGenerator:
         
         # Add creator footer
         story.append(Spacer(1, 0.5*inch))
-        footer = Paragraph("Study tracker created by Eli.", self.styles['Footer'])
+        footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
         story.append(footer)
         
         # Build PDF
@@ -765,17 +765,17 @@ class PDFReportGenerator:
         story = []
         
         # Title
-        title = Paragraph(f"Study Progress Report of {user_name}, RMT", self.styles['ReportTitle'])
+        title = Paragraph(f"Study Progress Report of {user_name}, RMT", self.styles['RMT_ReportTitle'])
         story.append(title)
         story.append(Spacer(1, 0.5*inch))
         
         if not sessions:
-            no_data = Paragraph("No study sessions recorded yet.", self.styles['BodyText'])
+            no_data = Paragraph("No study sessions recorded yet.", self.styles['RMT_BodyText'])
             story.append(no_data)
             
             # Add creator footer even when there's no data
             story.append(Spacer(1, 0.5*inch))
-            footer = Paragraph("Study tracker created by Eli.", self.styles['Footer'])
+            footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
             story.append(footer)
             
             doc.build(story)
@@ -802,7 +802,7 @@ class PDFReportGenerator:
         days_span = (last_date - first_date).days + 1
         
         # Add key statistics section
-        stats_title = Paragraph("Key Statistics", self.styles['SectionHeader'])
+        stats_title = Paragraph("Key Statistics", self.styles['RMT_SectionHeader'])
         story.append(stats_title)
         
         stats_data = [
@@ -848,7 +848,7 @@ class PDFReportGenerator:
         
         # Overall time distribution chart
         if total_study_time > 0 or total_break_time > 0:
-            chart_title = Paragraph("Overall Time Distribution", self.styles['SectionHeader'])
+            chart_title = Paragraph("Overall Time Distribution", self.styles['RMT_SectionHeader'])
             story.append(chart_title)
             
             drawing = Drawing(5*inch, 2.5*inch)
@@ -871,14 +871,14 @@ class PDFReportGenerator:
                 legend = Paragraph(
                     f"<font color='darkblue'>■</font> Study: {self._format_time(total_study_time)} ({100*total_study_time/total_time:.1f}%)<br/>"
                     f"<font color='lightblue'>■</font> Break: {self._format_time(total_break_time)} ({100*total_break_time/total_time:.1f}%)",
-                    self.styles['BodyText']
+                    self.styles['RMT_BodyText']
                 )
                 story.append(legend)
         
         story.append(Spacer(1, 0.3*inch))
         
         # Daily study time chart
-        daily_chart_title = Paragraph("Daily Study Time", self.styles['SectionHeader'])
+        daily_chart_title = Paragraph("Daily Study Time", self.styles['RMT_SectionHeader'])
         story.append(daily_chart_title)
         
         daily_data = []
@@ -914,7 +914,7 @@ class PDFReportGenerator:
         story.append(Spacer(1, 0.3*inch))
         
         # Subject breakdown
-        subject_title = Paragraph("Subject Breakdown", self.styles['SectionHeader'])
+        subject_title = Paragraph("Subject Breakdown", self.styles['RMT_SectionHeader'])
         story.append(subject_title)
         
         # Group study time by subject
@@ -1000,22 +1000,22 @@ class PDFReportGenerator:
                 )
                 legend_text += f"<font color='{hex_color}'>■</font> {subject}: {self._format_time(time)} ({percentage:.1f}%)<br/>"
             
-            legend = Paragraph(legend_text, self.styles['BodyText'])
+            legend = Paragraph(legend_text, self.styles['RMT_BodyText'])
             story.append(legend)
             story.append(Spacer(1, 0.3*inch))
         
         # Daily timeline
-        timeline_title = Paragraph("Daily Timeline", self.styles['SectionHeader'])
+        timeline_title = Paragraph("Daily Timeline", self.styles['RMT_SectionHeader'])
         story.append(timeline_title)
         
         for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
-            date_title = Paragraph(f"{date.strftime('%Y-%m-%d')}", self.styles['BodyText'])
+            date_title = Paragraph(f"{date.strftime('%Y-%m-%d')}", self.styles['RMT_BodyText'])
             story.append(date_title)
             
             day_total = sum(session['total_study_time'] for session in day_sessions)
             day_stats = Paragraph(
                 f"Total study time: {self._format_time(day_total)}", 
-                self.styles['BodyText']
+                self.styles['RMT_BodyText']
             )
             story.append(day_stats)
             
@@ -1052,7 +1052,7 @@ class PDFReportGenerator:
         for subject in sorted(subject_times.keys()):
             story.append(PageBreak())
             
-            subject_page_title = Paragraph(f"Subject: {subject}", self.styles['ReportTitle'])
+            subject_page_title = Paragraph(f"Subject: {subject}", self.styles['RMT_ReportTitle'])
             story.append(subject_page_title)
             story.append(Spacer(1, 0.3*inch))
             
@@ -1064,7 +1064,7 @@ class PDFReportGenerator:
                 f"Total Time: {self._format_time(subject_total)}<br/>"
                 f"Percentage of Total Study Time: {subject_percentage:.1f}%<br/>"
                 f"Number of Sessions: {len(subject_sessions)}", 
-                self.styles['BodyText']
+                self.styles['RMT_BodyText']
             )
             story.append(subject_summary)
             story.append(Spacer(1, 0.3*inch))
@@ -1078,7 +1078,7 @@ class PDFReportGenerator:
                 subject_by_date[date_key] += session['total_study_time']
             
             if subject_by_date:
-                daily_subject_title = Paragraph(f"Daily Progress for {subject}", self.styles['SectionHeader'])
+                daily_subject_title = Paragraph(f"Daily Progress for {subject}", self.styles['RMT_SectionHeader'])
                 story.append(daily_subject_title)
                 
                 daily_data = []
@@ -1114,7 +1114,7 @@ class PDFReportGenerator:
                 story.append(Spacer(1, 0.3*inch))
             
             # Sessions for this subject
-            sessions_title = Paragraph("Sessions", self.styles['SectionHeader'])
+            sessions_title = Paragraph("Sessions", self.styles['RMT_SectionHeader'])
             story.append(sessions_title)
             
             if subject_sessions:
@@ -1147,18 +1147,18 @@ class PDFReportGenerator:
                 
                 story.append(subject_session_table)
             else:
-                no_sessions = Paragraph("No sessions recorded for this subject.", self.styles['BodyText'])
+                no_sessions = Paragraph("No sessions recorded for this subject.", self.styles['RMT_BodyText'])
                 story.append(no_sessions)
             
             # Add creator footer to each subject page
             story.append(Spacer(1, 0.5*inch))
-            footer = Paragraph("Study tracker created by Eli.", self.styles['Footer'])
+            footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
             story.append(footer)
         
         # For the main page, add creator footer at the end
         if not subject_times:
             story.append(Spacer(1, 0.5*inch))
-            footer = Paragraph("Study tracker created by Eli.", self.styles['Footer'])
+            footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
             story.append(footer)
         
         # Build PDF
