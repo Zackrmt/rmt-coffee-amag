@@ -2324,18 +2324,27 @@ class TelegramBot:
             await query.message.delete()
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
-
+    
         user = update.effective_user
         session = self.study_sessions.get(user.id)
         
         if not session:
+            # CHANGED: Don't call start() here, just show an error message
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                "No active study session found. Start a new session?"
+                "No active study session found. Please start a new session."
             )
-            return await self.start(update, context)
-
+            buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
+            reply_markup = InlineKeyboardMarkup(buttons)
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Start a new session?",
+                reply_markup=reply_markup
+            )
+            return CHOOSING_MAIN_MENU
+    
         if query.data == 'start_break':
             session.start_break()
             buttons = [
@@ -2393,18 +2402,27 @@ class TelegramBot:
             await query.message.delete()
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
-
+    
         user = update.effective_user
         session = self.study_sessions.get(user.id)
         
         if not session:
+            # CHANGED: Don't call start() here, just show an error message
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                "No active study session found. Start a new session?"
+                "No active study session found. Please start a new session."
             )
-            return await self.start(update, context)
-
+            buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
+            reply_markup = InlineKeyboardMarkup(buttons)
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Start a new session?",
+                reply_markup=reply_markup
+            )
+            return CHOOSING_MAIN_MENU
+    
         session.end()
         manila_times = session.get_formatted_manila_times()
         
@@ -2420,7 +2438,7 @@ class TelegramBot:
             if 'messages_to_keep' not in context.user_data:
                 context.user_data['messages_to_keep'] = []
             context.user_data['messages_to_keep'].append(summary_msg)
-
+    
             study_time = session.get_total_study_time()
             study_time_msg = await self.send_bot_message(
                 context,
@@ -2429,7 +2447,7 @@ class TelegramBot:
                 should_delete=False
             )
             context.user_data['messages_to_keep'].append(study_time_msg)
-
+    
             session_info = [
                 f"Started: {manila_times['start'].strftime('%I:%M %p')}",
                 f"Ended: {manila_times['end'].strftime('%I:%M %p')}"
@@ -2455,7 +2473,7 @@ class TelegramBot:
                 "\n".join(session_info),
                 should_delete=True
             )
-
+    
             celebration_msg = await self.send_bot_message(
                 context,
                 update.effective_chat.id,
@@ -2463,14 +2481,14 @@ class TelegramBot:
                 should_delete=False
             )
             context.user_data['messages_to_keep'].append(celebration_msg)
-
+    
             await self.send_bot_message(
                 context,
                 update.effective_chat.id,
                 f"꧁RMT KA NA SA AUGUST꧂",
                 should_delete=True
             )
-
+    
             # Save completed session to database
             user_name = user.first_name or user.username or "User"
             self.db.save_study_session(user.id, user_name, session)
@@ -2504,7 +2522,7 @@ class TelegramBot:
                 "Ready to start another study session?",
                 reply_markup=reply_markup
             )
-
+    
         except Exception as e:
             logger.error(f"Error in end_session: {e}")
             await self.send_bot_message(
@@ -2512,7 +2530,7 @@ class TelegramBot:
                 update.effective_chat.id,
                 "There was an error ending your session. Please try again."
             )
-
+    
         del self.study_sessions[user.id]
         return CHOOSING_MAIN_MENU
 
@@ -2906,7 +2924,7 @@ class TelegramBot:
             await query.message.delete()
         except Exception as e:
             logger.error(f"Error deleting message: {e}")
-
+    
         if query.data == 'confirm_cancel':
             user = update.effective_user
             if user.id in self.study_sessions:
@@ -2917,11 +2935,23 @@ class TelegramBot:
                 del self.pending_sessions[user.id]
             
             await self.cleanup_messages(update, context)
-            return await self.start(update, context)
+            
+            # CHANGED: Don't call start() which creates a new conversation
+            # Instead, just show options to start a new session
+            buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
+            reply_markup = InlineKeyboardMarkup(buttons)
+            
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Operation cancelled. Would you like to start a new session?",
+                reply_markup=reply_markup,
+                should_delete=True
+            )
+            return CHOOSING_MAIN_MENU
             
         else:
             return context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
-
 # ================== ERROR HANDLER ==================
 async def error_handler(update, context):
     """Handle errors in the telegram bot."""
