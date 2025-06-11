@@ -3089,7 +3089,11 @@ async def run_bot_with_retries():
                     ]
                 },
                 fallbacks=[
-                    CallbackQueryHandler(telegram_bot.cancel_operation, pattern='^cancel_operation$')
+                    CallbackQueryHandler(telegram_bot.cancel_operation, pattern='^cancel_operation$'),
+                    # Add these lines to ensure buttons work even outside state handling
+                    CallbackQueryHandler(telegram_bot.handle_break, pattern='^start_break$'),
+                    CallbackQueryHandler(telegram_bot.handle_break, pattern='^end_break$'), 
+                    CallbackQueryHandler(telegram_bot.end_session, pattern='^end_session$')
                 ],
                 per_chat=True,
                 name="main_conversation",
@@ -3097,6 +3101,11 @@ async def run_bot_with_retries():
             )
 
             application.add_handler(conv_handler)
+
+            application.add_handler(CallbackQueryHandler(telegram_bot.handle_break, pattern='^start_break$'))
+            application.add_handler(CallbackQueryHandler(telegram_bot.handle_break, pattern='^end_break$'))
+            application.add_handler(CallbackQueryHandler(telegram_bot.end_session, pattern='^end_session$'))
+
             application.add_error_handler(error_handler)
             
             # First try to delete any existing webhook
