@@ -3559,9 +3559,10 @@ async def run_bot_with_retries():
             shared_state.telegram_bot = telegram_bot
             
             # Add command handlers
+            end_pattern = re.compile(r'^END', re.IGNORECASE)
             application.add_handler(
                 MessageHandler(
-                    filters.TEXT & filters.Regex(r'^END', flags=re.IGNORECASE) & ~filters.COMMAND,
+                    filters.TEXT & filters.Regex(end_pattern) & ~filters.COMMAND,
                     telegram_bot.end_text_message
                 ),
                 group=-1
