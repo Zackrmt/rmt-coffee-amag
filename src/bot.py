@@ -1140,8 +1140,8 @@ class PDFReportGenerator:
             # Increase the drawing height and adjust pie position
             drawing = Drawing(500, 400)  # Increased height from 300 to 400
             pie = Pie()
-            pie.x = 250  # Center horizontally
-            pie.y = 200  # Moved down 4x from 150 to 200
+            pie.x = 100  # Center horizontally
+            pie.y = 250  # Moved down 4x from 150 to 200
             pie.width = 250
             pie.height = 250
             
@@ -2482,9 +2482,7 @@ class TelegramBot:
             # Add buttons to download study reports
             buttons = [
                 [
-                    InlineKeyboardButton("THIS SESSION", callback_data='report_session'),
-                    InlineKeyboardButton("THIS DAY", callback_data='report_day'),
-                    InlineKeyboardButton("OVERALL", callback_data='report_overall')
+                    InlineKeyboardButton("THIS SESSION", callback_data='report_session')
                 ]
             ]
             report_markup = InlineKeyboardMarkup(buttons)
