@@ -513,143 +513,134 @@ class PDFReportGenerator:
         minutes = int((seconds % 3600) // 60)
         return f"{hours}h {minutes}m"
         
-    def generate_session_report(self, user_name, session):
-        """Generate a PDF report for a single study session."""
-        buffer = io.BytesIO()
-        # Use A6 instead of A7 for better readability
-        doc = SimpleDocTemplate(buffer, pagesize=A6)
-        story = []
+def generate_session_report(self, user_name, session):
+    """Generate a PDF report for a single study session."""
+    buffer = io.BytesIO()
+    # Use A6 instead of A7 for better readability
+    doc = SimpleDocTemplate(buffer, pagesize=A6)
+    story = []
+    
+    # Clean subject name by removing emojis
+    clean_subject = self._remove_emojis(session['subject'])
+    
+    # Title
+    title = Paragraph(f"Study Session Report", self.styles['RMT_ReportTitle'])
+    story.append(title)
+    
+    # User - reduce spacing after user subtitle
+    user_subtitle = Paragraph(f"{user_name}, RMT", self.styles['RMT_ReportSubtitle'])
+    story.append(user_subtitle)
+    story.append(Spacer(1, 0.1*inch))  # REDUCED from 0.2*inch
+    
+    # Session details
+    subject = Paragraph(f"Subject: {clean_subject}", self.styles['RMT_BodyText'])
+    story.append(subject)
+    
+    # Format times for display
+    start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
+    end_time = session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p') if session['end_time'] else "Ongoing"
+    
+    times = Paragraph(f"Started: {start_time}<br/>Ended: {end_time}", self.styles['RMT_BodyText'])
+    story.append(times)
+    
+    # Key statistics - removed spacer before stats table
+    stats_data = [
+        ['Metric', 'Value'],
+        ['Study Time', self._format_time(session['total_study_time'])],
+        ['Break Time', self._format_time(session['total_break_time'])]
+    ]
+    
+    if 'goal_time' in session and session['goal_time']:
+        stats_data.append(['Goal Progress', f"{session['progress_percentage']}%"])
+    
+    stats_table = Table(stats_data, colWidths=[1.5*inch, 1.5*inch])
+    stats_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),  # REDUCED padding
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('BOX', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ]))
+    story.append(stats_table)
+    
+    # Break details if any - reduced spacing before break details
+    if session['break_periods']:
+        story.append(Spacer(1, 0.15*inch))  # REDUCED from 0.3*inch
+        breaks_title = Paragraph("Break Details:", self.styles['RMT_SectionHeader'])
+        story.append(breaks_title)
         
-        # Clean subject name by removing emojis
-        clean_subject = self._remove_emojis(session['subject'])
+        break_data = [['#', 'Start', 'End', 'Duration']]
         
-        # Title
-        title = Paragraph(f"Study Session Report", self.styles['RMT_ReportTitle'])
-        story.append(title)
+        for i, break_period in enumerate(session['break_periods']):
+            break_start = break_period['start'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+            break_end = break_period['end'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+            duration = (break_period['end'] - break_period['start']).total_seconds()
+            duration_str = f"{int(duration // 60)}m {int(duration % 60)}s"
+            
+            break_data.append([f"{i+1}", break_start, break_end, duration_str])
         
-        # User
-        user_subtitle = Paragraph(f"{user_name}, RMT", self.styles['RMT_ReportSubtitle'])
-        story.append(user_subtitle)
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Session details
-        subject = Paragraph(f"Subject: {clean_subject}", self.styles['RMT_BodyText'])
-        story.append(subject)
-        
-        # Format times for display
-        start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
-        end_time = session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p') if session['end_time'] else "Ongoing"
-        
-        times = Paragraph(f"Started: {start_time}<br/>Ended: {end_time}", self.styles['RMT_BodyText'])
-        story.append(times)
-        
-        # Key statistics
-        stats_data = [
-            ['Metric', 'Value'],
-            ['Study Time', self._format_time(session['total_study_time'])],
-            ['Break Time', self._format_time(session['total_break_time'])]
-        ]
-        
-        if 'goal_time' in session and session['goal_time']:
-            stats_data.append(['Goal Progress', f"{session['progress_percentage']}%"])
-        
-        stats_table = Table(stats_data, colWidths=[1.5*inch, 1.5*inch])
-        stats_table.setStyle(TableStyle([
+        break_table = Table(break_data, colWidths=[0.3*inch, 1.0*inch, 1.0*inch, 0.7*inch])
+        break_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),  # REDUCED padding
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('BOX', (0, 0), (-1, -1), 1, colors.black),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]))
-        story.append(Spacer(1, 0.1*inch))
-        story.append(stats_table)
+        story.append(break_table)
+    
+    # Add productivity chart if session has ended - reduced spacing and adjusted chart size
+    if session['end_time']:
+        study_time = session['total_study_time']
+        break_time = session['total_break_time']
         
-        # Break details if any
-        if session['break_periods']:
-            story.append(Spacer(1, 0.3*inch))
-            breaks_title = Paragraph("Break Details:", self.styles['RMT_SectionHeader'])
-            story.append(breaks_title)
-            
-            break_data = [['#', 'Start', 'End', 'Duration']]
-            
-            for i, break_period in enumerate(session['break_periods']):
-                break_start = break_period['start'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                break_end = break_period['end'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                duration = (break_period['end'] - break_period['start']).total_seconds()
-                duration_str = f"{int(duration // 60)}m {int(duration % 60)}s"
-                
-                break_data.append([f"{i+1}", break_start, break_end, duration_str])
-            
-            break_table = Table(break_data, colWidths=[0.3*inch, 1.0*inch, 1.0*inch, 0.7*inch])
-            break_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('BOX', (0, 0), (-1, -1), 1, colors.black),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ]))
-            story.append(break_table)
-        
-        # Add productivity chart if session has ended
-        if session['end_time']:
-            story.append(Spacer(1, 0.3*inch))
+        if study_time > 0 or break_time > 0:  # Avoid division by zero
+            story.append(Spacer(1, 0.15*inch))  # REDUCED from 0.3*inch
             chart_title = Paragraph("Time Distribution", self.styles['RMT_SectionHeader'])
             story.append(chart_title)
             
-            # Create pie chart for study vs break time
-            drawing = Drawing(3*inch, 1.8*inch)  # Increased height
+            # Create pie chart for study vs break time - ADJUSTED size and positioning
+            drawing = Drawing(3*inch, 1.5*inch)  # REDUCED height from 1.8*inch
             pie = Pie()
-            pie.x = 1.5*inch
-            pie.y = 0.9*inch  # Adjusted y position for better centering
-            pie.width = 1.5*inch
-            pie.height = 1.5*inch
+            pie.x = 0.75*inch  # Center horizontally 
+            pie.y = 0.15*inch  # ADJUSTED y position higher
+            pie.width = 1.3*inch  # REDUCED from 1.5*inch
+            pie.height = 1.3*inch  # REDUCED from 1.5*inch
             
-            study_time = session['total_study_time']
-            break_time = session['total_break_time']
+            pie.data = [study_time, break_time]
+            pie.labels = ['Study', 'Break']
+            pie.slices.strokeWidth = 0.5
+            pie.slices[0].fillColor = self.pastel_colors['chart1']
+            pie.slices[1].fillColor = self.pastel_colors['chart2']
+            drawing.add(pie)
+            story.append(drawing)
             
-            if study_time > 0 or break_time > 0:  # Avoid division by zero
-                pie.data = [study_time, break_time]
-                pie.labels = ['Study', 'Break']
-                pie.slices.strokeWidth = 0.5
-                pie.slices[0].fillColor = self.pastel_colors['chart1']
-                pie.slices[1].fillColor = self.pastel_colors['chart2']
-                drawing.add(pie)
-                story.append(drawing)
-                
-                # Add legend with pastel colors
-                legend = Paragraph(
-                    f"<font color='{self._rgb_to_hex(self.pastel_colors['chart1'])}'>■</font> Study: {self._format_time(study_time)} ({100*study_time/(study_time+break_time):.1f}%)<br/>"
-                    f"<font color='{self._rgb_to_hex(self.pastel_colors['chart2'])}'>■</font> Break: {self._format_time(break_time)} ({100*break_time/(study_time+break_time):.1f}%)",
-                    self.styles['RMT_SmallText']
-                )
-                story.append(legend)
-                story.append(Spacer(1, 0.2*inch))  # Added extra spacing
-        
-        # Add creator footer
-        story.append(Spacer(1, 0.3*inch))
-        footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
-        story.append(footer)
-        
-        # Build PDF
-        doc.build(story)
-        buffer.seek(0)
-        return buffer
+            # Add legend with pastel colors - no extra spacing after
+            legend = Paragraph(
+                f"<font color='{self._rgb_to_hex(self.pastel_colors['chart1'])}'>■</font> Study: {self._format_time(study_time)} ({100*study_time/(study_time+break_time):.1f}%)<br/>"
+                f"<font color='{self._rgb_to_hex(self.pastel_colors['chart2'])}'>■</font> Break: {self._format_time(break_time)} ({100*break_time/(study_time+break_time):.1f}%)",
+                self.styles['RMT_SmallText']
+            )
+            story.append(legend)
+            # Removed extra spacing here
     
-    def _rgb_to_hex(self, color_obj):
-        """Convert a reportlab color to hex string for HTML."""
-        return '#{:02x}{:02x}{:02x}'.format(
-            int(color_obj.red * 255), 
-            int(color_obj.green * 255), 
-            int(color_obj.blue * 255)
-        )
+    # Add creator footer - reduced spacing before footer
+    story.append(Spacer(1, 0.15*inch))  # REDUCED from 0.3*inch
+    footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
+    story.append(footer)
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
         
     def generate_daily_report(self, user_name, date, sessions):
         """Generate a PDF report for a specific day."""
