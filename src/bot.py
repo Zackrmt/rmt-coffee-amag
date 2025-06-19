@@ -1370,8 +1370,8 @@ class PDFReportGenerator:
         bc.width = 400
         bc.data = [daily_data]
         bc.strokeColor = colors.black
-        # CHANGED to use pastel color
-        bc.fillColor = self.pastel_colors['chart1']
+        # CHANGED to use pastel color instead of default red
+        bc.fillColor = self.pastel_colors['chart1']  # Use pastel blue instead of red
         
         bc.valueAxis.valueMin = 0
         bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
@@ -1542,7 +1542,7 @@ class PDFReportGenerator:
                 bc.data = [daily_data]
                 bc.strokeColor = colors.black
                 # CHANGED to use pastel color instead of default red
-                bc.fillColor = self.pastel_colors['secondary']
+                bc.fillColor = self.pastel_colors['secondary']  # Use a different pastel color for subject detail charts
                 
                 bc.valueAxis.valueMin = 0
                 bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
@@ -2209,13 +2209,22 @@ class TelegramBot:
         # Update last activity timestamp
         self.record_activity()
         
+        # IMPROVED thread handling: Check multiple sources for thread_id
         thread_id = None
+        
+        # Check user_data for thread_id
         if 'thread_id' in context.user_data:
             thread_id = context.user_data['thread_id']
-        elif context.user_data.get('current_thread_id'):
+        elif 'current_thread_id' in context.user_data:
             thread_id = context.user_data['current_thread_id']
         
-        # Log the thread_id for debugging
+        # Also check pending sessions as a fallback
+        if not thread_id and hasattr(context, 'user_id') and context.user_id in self.pending_sessions:
+            pending_thread_id = self.pending_sessions[context.user_id].thread_id
+            if pending_thread_id:
+                thread_id = pending_thread_id
+        
+        # Debug logging
         if thread_id:
             logger.debug(f"Sending message to thread {thread_id}")
         else:
@@ -2293,19 +2302,37 @@ class TelegramBot:
         await self.cleanup_messages(update, context)
         self.record_activity()
         
-        # Store the thread_id if the message is in a topic
-        # This is the key part that needs fixing - ensure we capture message_thread_id
-        if update.message and update.message.is_topic_message:
-            context.user_data['thread_id'] = update.message.message_thread_id
-            logger.info(f"Started in thread {update.message.message_thread_id}")
-        elif update.effective_message and update.effective_message.is_topic_message:
-            # This catches cases when clicking on old messages in threads
-            context.user_data['thread_id'] = update.effective_message.message_thread_id
-            logger.info(f"Started in thread (from effective_message) {update.effective_message.message_thread_id}")
+        # IMPROVED thread handling: More robust detection of thread context
+        thread_id = None
+        
+        # First check update.message for thread_id
+        if update.message:
+            if update.message.is_topic_message:
+                thread_id = update.message.message_thread_id
+                logger.info(f"Started in thread from message {thread_id}")
+            elif hasattr(update.message, 'message_thread_id') and update.message.message_thread_id:
+                thread_id = update.message.message_thread_id
+                logger.info(f"Started in thread from message thread_id attribute {thread_id}")
+        
+        # If not found, check effective_message
+        if not thread_id and update.effective_message:
+            if update.effective_message.is_topic_message:
+                thread_id = update.effective_message.message_thread_id
+                logger.info(f"Started in thread from effective_message {thread_id}")
+            elif hasattr(update.effective_message, 'message_thread_id') and update.effective_message.message_thread_id:
+                thread_id = update.effective_message.message_thread_id
+                logger.info(f"Started in thread from effective_message thread_id attribute {thread_id}")
+        
+        # Store the thread_id in user_data
+        if thread_id:
+            context.user_data['thread_id'] = thread_id
+            context.user_data['current_thread_id'] = thread_id
         else:
             # Clear any existing thread_id if this is in main chat
             if 'thread_id' in context.user_data:
                 del context.user_data['thread_id']
+            if 'current_thread_id' in context.user_data:
+                del context.user_data['current_thread_id']
         
         # Modified buttons array to include the "LAST SESSION REPORT" button
         buttons = [
@@ -2335,13 +2362,6 @@ class TelegramBot:
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         
-        # Get thread_id from either message or effective_message
-        thread_id = None
-        if update.message and update.message.is_topic_message:
-            thread_id = update.message.message_thread_id
-        elif update.effective_message and update.effective_message.is_topic_message:
-            thread_id = update.effective_message.message_thread_id
-        
         # Create a pending session
         self.pending_sessions[user_id] = PendingSession(
             user_id=user_id,
@@ -2349,7 +2369,10 @@ class TelegramBot:
             message_ids=[message],
             start_time=datetime.datetime.now()
         )
-        self.pending_sessions[user_id].thread_id = thread_id
+        
+        # Store the thread_id in the pending session
+        if thread_id:
+            self.pending_sessions[user_id].thread_id = thread_id
         
         # Schedule cleanup task for this pending session
         asyncio.create_task(self.schedule_pending_session_cleanup(user_id))
@@ -2822,22 +2845,37 @@ class TelegramBot:
             session_dict = session.to_dict()
             context.user_data['last_session'] = session_dict
             
-            # Add buttons to download study reports
-            buttons = [
-                [
-                    InlineKeyboardButton("THIS SESSION", callback_data='report_session')
-                ]
-            ]
-            report_markup = InlineKeyboardMarkup(buttons)
-            
-            report_msg = await self.send_bot_message(
+            # CHANGED: Automatically generate and send the PDF without asking
+            await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                "Would you like to check your progress report in PDF?",
-                reply_markup=report_markup,
+                "Generating your session report... Please wait...",
                 should_delete=True
             )
             
+            try:
+                # Generate PDF
+                pdf_buffer = self.pdf_generator.generate_session_report(user_name, session_dict)
+                
+                # Send the PDF file with updated naming convention
+                await self.send_document(
+                    context,
+                    update.effective_chat.id,
+                    pdf_buffer,
+                    filename=f"{user_name}, RMT (LAST SESSION Report).pdf",
+                    caption=f"Here's your last study session report, {user_name}!"
+                )
+
+            except Exception as e:
+                logger.error(f"Error generating session report: {e}")
+                await self.send_bot_message(
+                    context,
+                    update.effective_chat.id,
+                    "Sorry, there was an error generating your session report.",
+                    should_delete=True
+                )
+            
+            # Show button to start a new session
             buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
             reply_markup = InlineKeyboardMarkup(buttons)
             
@@ -2983,9 +3021,10 @@ class TelegramBot:
                 context,
                 update.effective_chat.id,
                 pdf_buffer,
-                filename=f"Daily Study Report {today.strftime('%Y-%m-%d')} - {user_name}, RMT.pdf",
-                caption=f"Here's your daily study report, {user_name}!"
+                filename=f"{user_name}, RMT (DAILY REPORT for {formatted_date}).pdf",
+                caption=f"Here's your study report for today, {user_name}!"
             )
+
             
             # Delete the PDF generation message
             buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
@@ -3062,8 +3101,8 @@ class TelegramBot:
                 context,
                 update.effective_chat.id,
                 pdf_buffer,
-                filename=f"Study Progress Report of {user_name}, RMT.pdf",
-                caption=f"Here's your complete study progress report, {user_name}!"
+                filename=f"{user_name}, RMT (DAILY REPORT for {formatted_date}).pdf",
+                caption=f"Here's your study report for today, {user_name}!"
             )
             
             # Show start studying button
