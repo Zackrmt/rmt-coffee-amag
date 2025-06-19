@@ -640,9 +640,8 @@ class PDFReportGenerator:
         # Clean subject name by removing emojis
         clean_subject = self._remove_emojis(session['subject'])
         
-        # UPDATED: Title now includes report type
-        report_type = "CURRENT SESSION" if is_current else "LAST SESSION"
-        title = Paragraph(f"{user_name}, RMT ({report_type} Report)", self.styles['RMT_ReportTitle'])
+        # Title
+        title = Paragraph(f"Study Session Report", self.styles['RMT_ReportTitle'])
         story.append(title)
         
         # User - reduce spacing after user subtitle
@@ -766,10 +765,9 @@ class PDFReportGenerator:
         # Use A5 instead of A7 for better readability
         doc = SimpleDocTemplate(buffer, pagesize=A5)
         story = []
-
-        # UPDATED: Format the date properly for the title
-        formatted_date = date.strftime('%B %d')
-        title = Paragraph(f"{user_name}, RMT (DAILY REPORT for {formatted_date})", self.styles['RMT_ReportTitle'])
+        
+        # Title
+        title = Paragraph(f"Daily Study Report", self.styles['RMT_ReportTitle'])
         story.append(title)
         
         # User and Date - updated date format to Month Day, Year
@@ -2101,51 +2099,6 @@ class TelegramBot:
         
         # Initialize Google Drive DB
         self.db.initialize()
-        
-    # Add this new handler to intercept all commands
-    async def thread_command_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Pre-handler for commands to maintain thread context"""
-        user_id = update.effective_user.id
-        message = update.effective_message
-        
-        # If message is in a thread, update the user's thread mapping
-        if message and message.is_topic_message:
-            thread_id = message.message_thread_id
-            self.user_thread_map[user_id] = thread_id
-            logger.info(f"Updated thread mapping for user {user_id} to thread {thread_id}")
-        
-        # If command is in general chat but we know this user has a thread, delete the command and show guidance
-        elif user_id in self.user_thread_map:
-            thread_id = self.user_thread_map[user_id]
-            
-            # Try to delete the command message from general chat if possible
-            try:
-                await message.delete()
-            except Exception as e:
-                logger.error(f"Could not delete message: {e}")
-            
-            # Send a notice in the proper thread
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"Please use commands within this thread. I've moved our conversation here.",
-                message_thread_id=thread_id
-            )
-            
-            # Now send the same command to the bot in the right thread context
-            command = message.text
-            if command:
-                # Store the context for thread in user data
-                context.user_data['thread_id'] = thread_id
-                context.user_data['current_thread_id'] = thread_id
-                
-                # For /start command, just call the start handler directly
-                if command == "/start":
-                    await self.start(update, context)
-                    return True
-            
-            return True  # Command handled
-        
-        return False  # Let command proceed normally
 
     async def reset_user_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Reset/delete user data from the database."""
@@ -2244,24 +2197,6 @@ class TelegramBot:
         if user_id in self.pending_sessions:
             del self.pending_sessions[user_id]
 
-    async def update_thread_context(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Update thread context from current update if available."""
-        # Check for thread ID in various places
-        thread_id = None
-        
-        if update.message and update.message.is_topic_message:
-            thread_id = update.message.message_thread_id
-        elif update.callback_query and update.callback_query.message and update.callback_query.message.is_topic_message:
-            thread_id = update.callback_query.message.message_thread_id
-        elif update.effective_message and update.effective_message.is_topic_message:
-            thread_id = update.effective_message.message_thread_id
-        
-        if thread_id:
-            context.user_data['thread_id'] = thread_id
-            context.user_data['current_thread_id'] = thread_id
-            return True
-        return False
-
     async def send_bot_message(
         self, 
         context: ContextTypes.DEFAULT_TYPE,
@@ -2274,22 +2209,11 @@ class TelegramBot:
         # Update last activity timestamp
         self.record_activity()
         
-        # IMPROVED THREAD HANDLING: Get thread_id from multiple possible sources
         thread_id = None
-        
-        # Try to get thread_id from context.user_data
         if 'thread_id' in context.user_data:
             thread_id = context.user_data['thread_id']
-        elif 'current_thread_id' in context.user_data:
+        elif context.user_data.get('current_thread_id'):
             thread_id = context.user_data['current_thread_id']
-        
-        # If we have an active thread from the update, prefer that
-        if hasattr(context, 'update') and context.update:
-            if context.update.effective_message and context.update.effective_message.is_topic_message:
-                thread_id = context.update.effective_message.message_thread_id
-                # Also update user_data for future use
-                context.user_data['thread_id'] = thread_id
-                context.user_data['current_thread_id'] = thread_id
         
         # Log the thread_id for debugging
         if thread_id:
@@ -2323,22 +2247,12 @@ class TelegramBot:
         """Send a document with proper thread ID handling."""
         self.record_activity()
         
-        # IMPROVED THREAD HANDLING: Get thread_id from multiple possible sources
+        # Get thread_id from user_data if available
         thread_id = None
-        
-        # Try to get thread_id from context.user_data
         if 'thread_id' in context.user_data:
             thread_id = context.user_data['thread_id']
-        elif 'current_thread_id' in context.user_data:
+        elif context.user_data.get('current_thread_id'):
             thread_id = context.user_data['current_thread_id']
-        
-        # If we have an active thread from the update, prefer that
-        if hasattr(context, 'update') and context.update:
-            if context.update.effective_message and context.update.effective_message.is_topic_message:
-                thread_id = context.update.effective_message.message_thread_id
-                # Also update user_data for future use
-                context.user_data['thread_id'] = thread_id
-                context.user_data['current_thread_id'] = thread_id
         
         # Send the document with thread_id if in a topic
         message = await context.bot.send_document(
@@ -2379,34 +2293,19 @@ class TelegramBot:
         await self.cleanup_messages(update, context)
         self.record_activity()
         
-        # IMPROVED THREAD HANDLING: Check for thread context from various sources
-        thread_id = None
-        
-        # Check if the message is in a topic/thread
+        # Store the thread_id if the message is in a topic
+        # This is the key part that needs fixing - ensure we capture message_thread_id
         if update.message and update.message.is_topic_message:
-            thread_id = update.message.message_thread_id
-            logger.info(f"Started in thread {thread_id} (from message)")
-        
-        # Check if the message has thread info in the effective_message
+            context.user_data['thread_id'] = update.message.message_thread_id
+            logger.info(f"Started in thread {update.message.message_thread_id}")
         elif update.effective_message and update.effective_message.is_topic_message:
-            thread_id = update.effective_message.message_thread_id
-            logger.info(f"Started in thread {thread_id} (from effective_message)")
-        
-        # Check if there's a thread_id from a previous conversation stored in user_data
-        elif 'thread_id' in context.user_data:
-            thread_id = context.user_data['thread_id']
-            logger.info(f"Using stored thread_id {thread_id} from user_data")
-        
-        # Store or update the thread_id
-        if thread_id:
-            context.user_data['thread_id'] = thread_id
-            context.user_data['current_thread_id'] = thread_id
+            # This catches cases when clicking on old messages in threads
+            context.user_data['thread_id'] = update.effective_message.message_thread_id
+            logger.info(f"Started in thread (from effective_message) {update.effective_message.message_thread_id}")
         else:
-            # Clear any existing thread_id if this is definitely in main chat
+            # Clear any existing thread_id if this is in main chat
             if 'thread_id' in context.user_data:
                 del context.user_data['thread_id']
-            if 'current_thread_id' in context.user_data:
-                del context.user_data['current_thread_id']
         
         # Modified buttons array to include the "LAST SESSION REPORT" button
         buttons = [
@@ -2419,7 +2318,6 @@ class TelegramBot:
         
         welcome_text = "Welcome to RMT Study Bot! 📚✨"
         
-        # This send_bot_message method will handle thread_id properly
         message = await self.send_bot_message(
             context,
             update.effective_chat.id,
@@ -2437,7 +2335,14 @@ class TelegramBot:
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         
-        # Create a pending session with proper thread_id
+        # Get thread_id from either message or effective_message
+        thread_id = None
+        if update.message and update.message.is_topic_message:
+            thread_id = update.message.message_thread_id
+        elif update.effective_message and update.effective_message.is_topic_message:
+            thread_id = update.effective_message.message_thread_id
+        
+        # Create a pending session
         self.pending_sessions[user_id] = PendingSession(
             user_id=user_id,
             chat_id=chat_id,
@@ -2917,36 +2822,22 @@ class TelegramBot:
             session_dict = session.to_dict()
             context.user_data['last_session'] = session_dict
             
-            # CHANGED: Instead of showing PDF report options, generate and send the PDF automatically
-            await self.send_bot_message(
+            # Add buttons to download study reports
+            buttons = [
+                [
+                    InlineKeyboardButton("THIS SESSION", callback_data='report_session')
+                ]
+            ]
+            report_markup = InlineKeyboardMarkup(buttons)
+            
+            report_msg = await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                "Generating your session report... Please wait...",
+                "Would you like to check your progress report in PDF?",
+                reply_markup=report_markup,
                 should_delete=True
             )
             
-            try:
-                # Generate PDF
-                pdf_buffer = self.pdf_generator.generate_session_report(user_name, session_dict)
-                
-                # Send the PDF file with the updated message
-                await self.send_document(
-                    context,
-                    update.effective_chat.id,
-                    pdf_buffer,
-                    filename=f"Session Report - {user_name}, RMT.pdf",
-                    caption=f"Here's your complete study progress report, {user_name}! (attached THIS SESSION PDF)"
-                )
-            except Exception as e:
-                logger.error(f"Error generating session report: {e}")
-                await self.send_bot_message(
-                    context,
-                    update.effective_chat.id,
-                    "Sorry, there was an error generating your session report.",
-                    should_delete=True
-                )
-            
-            # Show button to start a new session
             buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
             reply_markup = InlineKeyboardMarkup(buttons)
             
@@ -3166,13 +3057,13 @@ class TelegramBot:
             # Generate PDF
             pdf_buffer = self.pdf_generator.generate_full_report(user_name, all_sessions)
             
-            # Send the PDF file with updated caption
+            # Send the PDF file
             await self.send_document(
                 context,
                 update.effective_chat.id,
                 pdf_buffer,
                 filename=f"Study Progress Report of {user_name}, RMT.pdf",
-                caption=f"Here's your complete OVERALL study progress report, {user_name}! 📊"
+                caption=f"Here's your complete study progress report, {user_name}!"
             )
             
             # Show start studying button
@@ -3578,16 +3469,8 @@ async def run_bot_with_retries():
             telegram_bot = TelegramBot()
             telegram_bot.application = application
             
-            # Initialize user_thread_map for thread handling
-            telegram_bot.user_thread_map = {}
-            
             # Store in shared state
             shared_state.telegram_bot = telegram_bot
-            
-            # IMPORTANT NEW HANDLER: Add thread command handler with negative group number to ensure it runs first
-            application.add_handler(
-                TypeHandler(Update, telegram_bot.thread_command_handler), group=-1
-            )
             
             # Add command handlers
             application.add_handler(CommandHandler('start', telegram_bot.start))
@@ -3780,8 +3663,8 @@ def main():
         
         # Add version and startup info
         logger.info(f"Starting RMT Study Bot v1.2.0 - 24/7 Edition with Google Drive Persistence")
-        logger.info(f"Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-06-19 20:30:00")
-        logger.info(f"Current User's Login: Zackrmtno")
+        logger.info(f"Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"Current User's Login: {CURRENT_USER}")
         logger.info(f"Process ID: {os.getpid()}")
         
         # Run the bot with retries
@@ -3793,125 +3676,6 @@ def main():
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
         sys.exit(1)
-
-async def run_bot_with_retries():
-    """Run the bot with automatic reconnection on failures"""
-    max_retries = 10
-    retry_count = 0
-    retry_delay = 5  # seconds
-    
-    while retry_count < max_retries:
-        try:
-            logger.info(f"Starting bot (attempt {retry_count + 1}/{max_retries})")
-            
-            # Initialize persistence and bot
-            persistence = PicklePersistence(filepath=PERSISTENCE_PATH)
-            application = Application.builder().token(TOKEN).persistence(persistence).build()
-            
-            # Initialize bot instance
-            bot = TelegramBot()
-            
-            # Create HTTP ping server for keepalive
-            keepalive = KeepaliveServer()
-            keepalive_task = asyncio.create_task(keepalive.start())
-            
-            # Create self-ping task
-            self_ping_task = asyncio.create_task(self_ping())
-            
-            # Add error handler
-            application.add_error_handler(error_handler)
-            
-            # IMPORTANT NEW HANDLER: Add thread command handler with negative group number to ensure it runs first
-            application.add_handler(
-                TypeHandler(Update, bot.thread_command_handler), group=-1
-            )
-            
-            # Register command handlers
-            application.add_handler(ConversationHandler(
-                entry_points=[
-                    CommandHandler('start', bot.start),
-                    CommandHandler('help', bot.help_command),
-                    CommandHandler('reset', bot.reset_user_data),
-                    CommandHandler('debug', bot.debug_command),
-                ],
-                states={
-                    CHOOSING_MAIN_MENU: [
-                        CallbackQueryHandler(bot.init_subject_choice, pattern='^start_studying$'),
-                        CallbackQueryHandler(bot.generate_overall_progress_report, pattern='^overall_progress$'),
-                        CallbackQueryHandler(bot.generate_daily_report, pattern='^today_report$'),
-                        CallbackQueryHandler(bot.generate_last_session_report, pattern='^last_session_report$'),
-                    ],
-                    ENTERING_SUBJECT: [
-                        MessageHandler(filters.TEXT & ~filters.COMMAND, bot.set_subject),
-                        CallbackQueryHandler(bot.handle_start_back, pattern='^back$'),
-                    ],
-                    SETTING_GOAL_TIME: [
-                        CallbackQueryHandler(bot.set_goal_time, pattern='^goal_time_.+'),
-                        CallbackQueryHandler(bot.skip_goal_time, pattern='^skip_goal$'),
-                        CallbackQueryHandler(bot.handle_goal_back, pattern='^back$'),
-                    ],
-                    STUDYING: [
-                        CallbackQueryHandler(bot.start_break, pattern='^start_break$'),
-                        CallbackQueryHandler(bot.end_session, pattern='^end_session$'),
-                    ],
-                    ON_BREAK: [
-                        CallbackQueryHandler(bot.end_break, pattern='^end_break$'),
-                        CallbackQueryHandler(bot.end_session_from_break, pattern='^end_session$'),
-                    ],
-                    CONFIRMATION: [
-                        CallbackQueryHandler(bot.handle_reset_confirmation, pattern='^confirm_reset$|^cancel_reset$'),
-                    ],
-                },
-                fallbacks=[
-                    CommandHandler('cancel', bot.cancel),
-                    CommandHandler('reset', bot.reset_user_data),
-                ],
-                name="main_conversation",
-                persistent=True,
-            ))
-            
-            # Register other handlers
-            application.add_handler(CommandHandler('debug', bot.debug_command))
-            application.add_handler(CommandHandler('cancel', bot.cancel))
-            application.add_handler(CommandHandler('help', bot.help_command))
-            
-            # Add callback handler for export PDF buttons
-            application.add_handler(CallbackQueryHandler(bot.generate_session_pdf, pattern='^generate_session_pdf$'))
-            application.add_handler(CallbackQueryHandler(bot.cancel_pdf_generation, pattern='^cancel_pdf$'))
-            
-            # Start polling
-            await application.initialize()
-            await force_clear_telegram_updates(TOKEN)  # Clear any pending updates
-            await application.start()
-            await application.updater.start_polling()
-            
-            # Keep the bot running until it's interrupted
-            try:
-                await application.updater.wait_closed()  
-            except asyncio.CancelledError:
-                logger.info("Polling cancelled, stopping bot...")
-                pass
-                
-            # Cleanup tasks
-            keepalive_task.cancel()
-            self_ping_task.cancel()
-            await application.stop()
-            await application.shutdown()
-            
-            # Break out of the retry loop if we've stopped cleanly
-            break
-            
-        except Exception as e:
-            retry_count += 1
-            logger.error(f"Bot crashed: {str(e)}")
-            logger.info(f"Retrying in {retry_delay} seconds...")
-            await asyncio.sleep(retry_delay)
-            
-            # Increase the delay for next retry (exponential backoff)
-            retry_delay = min(retry_delay * 2, 300)  # Cap at 5 minutes
-    
-    if retry_count >= max_retries:
-        logger.critical("Maximum retry attempts reached. Bot is shutting down.")
 
 if __name__ == '__main__':
     main()
