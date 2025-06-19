@@ -3578,8 +3578,16 @@ async def run_bot_with_retries():
             telegram_bot = TelegramBot()
             telegram_bot.application = application
             
+            # Initialize user_thread_map for thread handling
+            telegram_bot.user_thread_map = {}
+            
             # Store in shared state
             shared_state.telegram_bot = telegram_bot
+            
+            # IMPORTANT NEW HANDLER: Add thread command handler with negative group number to ensure it runs first
+            application.add_handler(
+                TypeHandler(Update, telegram_bot.thread_command_handler), group=-1
+            )
             
             # Add command handlers
             application.add_handler(CommandHandler('start', telegram_bot.start))
