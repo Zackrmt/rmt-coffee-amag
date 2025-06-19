@@ -640,8 +640,9 @@ class PDFReportGenerator:
         # Clean subject name by removing emojis
         clean_subject = self._remove_emojis(session['subject'])
         
-        # Title
-        title = Paragraph(f"Study Session Report", self.styles['RMT_ReportTitle'])
+        # UPDATED: Title now includes report type
+        report_type = "CURRENT SESSION" if is_current else "LAST SESSION"
+        title = Paragraph(f"{user_name}, RMT ({report_type} Report)", self.styles['RMT_ReportTitle'])
         story.append(title)
         
         # User - reduce spacing after user subtitle
@@ -765,9 +766,10 @@ class PDFReportGenerator:
         # Use A5 instead of A7 for better readability
         doc = SimpleDocTemplate(buffer, pagesize=A5)
         story = []
-        
-        # Title
-        title = Paragraph(f"Daily Study Report", self.styles['RMT_ReportTitle'])
+
+        # UPDATED: Format the date properly for the title
+        formatted_date = date.strftime('%B %d')
+        title = Paragraph(f"{user_name}, RMT (DAILY REPORT for {formatted_date})", self.styles['RMT_ReportTitle'])
         story.append(title)
         
         # User and Date - updated date format to Month Day, Year
@@ -2822,22 +2824,36 @@ class TelegramBot:
             session_dict = session.to_dict()
             context.user_data['last_session'] = session_dict
             
-            # Add buttons to download study reports
-            buttons = [
-                [
-                    InlineKeyboardButton("THIS SESSION", callback_data='report_session')
-                ]
-            ]
-            report_markup = InlineKeyboardMarkup(buttons)
-            
-            report_msg = await self.send_bot_message(
+            # CHANGED: Instead of showing PDF report options, generate and send the PDF automatically
+            await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                "Would you like to check your progress report in PDF?",
-                reply_markup=report_markup,
+                "Generating your session report... Please wait...",
                 should_delete=True
             )
             
+            try:
+                # Generate PDF
+                pdf_buffer = self.pdf_generator.generate_session_report(user_name, session_dict)
+                
+                # Send the PDF file with the updated message
+                await self.send_document(
+                    context,
+                    update.effective_chat.id,
+                    pdf_buffer,
+                    filename=f"Session Report - {user_name}, RMT.pdf",
+                    caption=f"Here's your complete study progress report, {user_name}! (attached THIS SESSION PDF)"
+                )
+            except Exception as e:
+                logger.error(f"Error generating session report: {e}")
+                await self.send_bot_message(
+                    context,
+                    update.effective_chat.id,
+                    "Sorry, there was an error generating your session report.",
+                    should_delete=True
+                )
+            
+            # Show button to start a new session
             buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
             reply_markup = InlineKeyboardMarkup(buttons)
             
@@ -3057,13 +3073,13 @@ class TelegramBot:
             # Generate PDF
             pdf_buffer = self.pdf_generator.generate_full_report(user_name, all_sessions)
             
-            # Send the PDF file
+            # Send the PDF file with updated caption
             await self.send_document(
                 context,
                 update.effective_chat.id,
                 pdf_buffer,
                 filename=f"Study Progress Report of {user_name}, RMT.pdf",
-                caption=f"Here's your complete study progress report, {user_name}!"
+                caption=f"Here's your complete OVERALL study progress report, {user_name}! 📊"
             )
             
             # Show start studying button
