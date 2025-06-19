@@ -513,78 +513,55 @@ class PDFReportGenerator:
         minutes = int((seconds % 3600) // 60)
         return f"{hours}h {minutes}m"
         
-def generate_session_report(self, user_name, session):
-    """Generate a PDF report for a single study session."""
-    buffer = io.BytesIO()
-    # Use A6 instead of A7 for better readability
-    doc = SimpleDocTemplate(buffer, pagesize=A6)
-    story = []
-    
-    # Clean subject name by removing emojis
-    clean_subject = self._remove_emojis(session['subject'])
-    
-    # Title
-    title = Paragraph(f"Study Session Report", self.styles['RMT_ReportTitle'])
-    story.append(title)
-    
-    # User - reduce spacing after user subtitle
-    user_subtitle = Paragraph(f"{user_name}, RMT", self.styles['RMT_ReportSubtitle'])
-    story.append(user_subtitle)
-    story.append(Spacer(1, 0.1*inch))  # REDUCED from 0.2*inch
-    
-    # Session details
-    subject = Paragraph(f"Subject: {clean_subject}", self.styles['RMT_BodyText'])
-    story.append(subject)
-    
-    # Format times for display
-    start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
-    end_time = session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p') if session['end_time'] else "Ongoing"
-    
-    times = Paragraph(f"Started: {start_time}<br/>Ended: {end_time}", self.styles['RMT_BodyText'])
-    story.append(times)
-    
-    # Key statistics - removed spacer before stats table
-    stats_data = [
-        ['Metric', 'Value'],
-        ['Study Time', self._format_time(session['total_study_time'])],
-        ['Break Time', self._format_time(session['total_break_time'])]
-    ]
-    
-    if 'goal_time' in session and session['goal_time']:
-        stats_data.append(['Goal Progress', f"{session['progress_percentage']}%"])
-    
-    stats_table = Table(stats_data, colWidths=[1.5*inch, 1.5*inch])
-    stats_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),  # REDUCED padding
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('BOX', (0, 0), (-1, -1), 1, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    ]))
-    story.append(stats_table)
-    
-    # Break details if any - reduced spacing before break details
-    if session['break_periods']:
-        story.append(Spacer(1, 0.15*inch))  # REDUCED from 0.3*inch
-        breaks_title = Paragraph("Break Details:", self.styles['RMT_SectionHeader'])
-        story.append(breaks_title)
+    def _rgb_to_hex(self, rgb_color):
+        """Convert RGB color object to hex string for HTML."""
+        r = int(rgb_color.red * 255)
+        g = int(rgb_color.green * 255)
+        b = int(rgb_color.blue * 255)
+        return f"#{r:02x}{g:02x}{b:02x}"
         
-        break_data = [['#', 'Start', 'End', 'Duration']]
+    def generate_session_report(self, user_name, session):
+        """Generate a PDF report for a single study session."""
+        buffer = io.BytesIO()
+        # Use A6 instead of A7 for better readability
+        doc = SimpleDocTemplate(buffer, pagesize=A6)
+        story = []
         
-        for i, break_period in enumerate(session['break_periods']):
-            break_start = break_period['start'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-            break_end = break_period['end'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-            duration = (break_period['end'] - break_period['start']).total_seconds()
-            duration_str = f"{int(duration // 60)}m {int(duration % 60)}s"
-            
-            break_data.append([f"{i+1}", break_start, break_end, duration_str])
+        # Clean subject name by removing emojis
+        clean_subject = self._remove_emojis(session['subject'])
         
-        break_table = Table(break_data, colWidths=[0.3*inch, 1.0*inch, 1.0*inch, 0.7*inch])
-        break_table.setStyle(TableStyle([
+        # Title
+        title = Paragraph(f"Study Session Report", self.styles['RMT_ReportTitle'])
+        story.append(title)
+        
+        # User - reduce spacing after user subtitle
+        user_subtitle = Paragraph(f"{user_name}, RMT", self.styles['RMT_ReportSubtitle'])
+        story.append(user_subtitle)
+        story.append(Spacer(1, 0.1*inch))  # REDUCED from 0.2*inch
+        
+        # Session details
+        subject = Paragraph(f"Subject: {clean_subject}", self.styles['RMT_BodyText'])
+        story.append(subject)
+        
+        # Format times for display
+        start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
+        end_time = session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p') if session['end_time'] else "Ongoing"
+        
+        times = Paragraph(f"Started: {start_time}<br/>Ended: {end_time}", self.styles['RMT_BodyText'])
+        story.append(times)
+        
+        # Key statistics - removed spacer before stats table
+        stats_data = [
+            ['Metric', 'Value'],
+            ['Study Time', self._format_time(session['total_study_time'])],
+            ['Break Time', self._format_time(session['total_break_time'])]
+        ]
+        
+        if 'goal_time' in session and session['goal_time']:
+            stats_data.append(['Goal Progress', f"{session['progress_percentage']}%"])
+        
+        stats_table = Table(stats_data, colWidths=[1.5*inch, 1.5*inch])
+        stats_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -595,52 +572,82 @@ def generate_session_report(self, user_name, session):
             ('BOX', (0, 0), (-1, -1), 1, colors.black),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]))
-        story.append(break_table)
-    
-    # Add productivity chart if session has ended - reduced spacing and adjusted chart size
-    if session['end_time']:
-        study_time = session['total_study_time']
-        break_time = session['total_break_time']
+        story.append(stats_table)
         
-        if study_time > 0 or break_time > 0:  # Avoid division by zero
+        # Break details if any - reduced spacing before break details
+        if session['break_periods']:
             story.append(Spacer(1, 0.15*inch))  # REDUCED from 0.3*inch
-            chart_title = Paragraph("Time Distribution", self.styles['RMT_SectionHeader'])
-            story.append(chart_title)
+            breaks_title = Paragraph("Break Details:", self.styles['RMT_SectionHeader'])
+            story.append(breaks_title)
             
-            # Create pie chart for study vs break time - ADJUSTED size and positioning
-            drawing = Drawing(3*inch, 1.5*inch)  # REDUCED height from 1.8*inch
-            pie = Pie()
-            pie.x = 0.75*inch  # Center horizontally 
-            pie.y = 0.15*inch  # ADJUSTED y position higher
-            pie.width = 1.3*inch  # REDUCED from 1.5*inch
-            pie.height = 1.3*inch  # REDUCED from 1.5*inch
+            break_data = [['#', 'Start', 'End', 'Duration']]
             
-            pie.data = [study_time, break_time]
-            pie.labels = ['Study', 'Break']
-            pie.slices.strokeWidth = 0.5
-            pie.slices[0].fillColor = self.pastel_colors['chart1']
-            pie.slices[1].fillColor = self.pastel_colors['chart2']
-            drawing.add(pie)
-            story.append(drawing)
+            for i, break_period in enumerate(session['break_periods']):
+                break_start = break_period['start'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                break_end = break_period['end'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                duration = (break_period['end'] - break_period['start']).total_seconds()
+                duration_str = f"{int(duration // 60)}m {int(duration % 60)}s"
+                
+                break_data.append([f"{i+1}", break_start, break_end, duration_str])
             
-            # Add legend with pastel colors - no extra spacing after
-            legend = Paragraph(
-                f"<font color='{self._rgb_to_hex(self.pastel_colors['chart1'])}'>■</font> Study: {self._format_time(study_time)} ({100*study_time/(study_time+break_time):.1f}%)<br/>"
-                f"<font color='{self._rgb_to_hex(self.pastel_colors['chart2'])}'>■</font> Break: {self._format_time(break_time)} ({100*break_time/(study_time+break_time):.1f}%)",
-                self.styles['RMT_SmallText']
-            )
-            story.append(legend)
-            # Removed extra spacing here
-    
-    # Add creator footer - reduced spacing before footer
-    story.append(Spacer(1, 0.15*inch))  # REDUCED from 0.3*inch
-    footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
-    story.append(footer)
-    
-    # Build PDF
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
+            break_table = Table(break_data, colWidths=[0.3*inch, 1.0*inch, 1.0*inch, 0.7*inch])
+            break_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 6),  # REDUCED padding
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BOX', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(break_table)
+        
+        # Add productivity chart if session has ended - reduced spacing and adjusted chart size
+        if session['end_time']:
+            study_time = session['total_study_time']
+            break_time = session['total_break_time']
+            
+            if study_time > 0 or break_time > 0:  # Avoid division by zero
+                story.append(Spacer(1, 0.15*inch))  # REDUCED from 0.3*inch
+                chart_title = Paragraph("Time Distribution", self.styles['RMT_SectionHeader'])
+                story.append(chart_title)
+                
+                # Create pie chart for study vs break time - ADJUSTED size and positioning
+                drawing = Drawing(3*inch, 1.5*inch)  # REDUCED height from 1.8*inch
+                pie = Pie()
+                pie.x = 0.75*inch  # Center horizontally 
+                pie.y = 0.15*inch  # ADJUSTED y position higher
+                pie.width = 1.3*inch  # REDUCED from 1.5*inch
+                pie.height = 1.3*inch  # REDUCED from 1.5*inch
+                
+                pie.data = [study_time, break_time]
+                pie.labels = ['Study', 'Break']
+                pie.slices.strokeWidth = 0.5
+                pie.slices[0].fillColor = self.pastel_colors['chart1']
+                pie.slices[1].fillColor = self.pastel_colors['chart2']
+                drawing.add(pie)
+                story.append(drawing)
+                
+                # Add legend with pastel colors - no extra spacing after
+                legend = Paragraph(
+                    f"<font color='{self._rgb_to_hex(self.pastel_colors['chart1'])}'>■</font> Study: {self._format_time(study_time)} ({100*study_time/(study_time+break_time):.1f}%)<br/>"
+                    f"<font color='{self._rgb_to_hex(self.pastel_colors['chart2'])}'>■</font> Break: {self._format_time(break_time)} ({100*break_time/(study_time+break_time):.1f}%)",
+                    self.styles['RMT_SmallText']
+                )
+                story.append(legend)
+                # Removed extra spacing here
+        
+        # Add creator footer - reduced spacing before footer
+        story.append(Spacer(1, 0.15*inch))  # REDUCED from 0.3*inch
+        footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
+        story.append(footer)
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        return buffer
         
     def generate_daily_report(self, user_name, date, sessions):
         """Generate a PDF report for a specific day."""
@@ -1981,10 +1988,12 @@ class TelegramBot:
             if 'thread_id' in context.user_data:
                 del context.user_data['thread_id']
         
+        # Modified buttons array to include the new "LAST SESSION REPORT" button
         buttons = [
             [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
             [InlineKeyboardButton("MY OVERALL PROGRESS 📊", callback_data='overall_progress')],
-            [InlineKeyboardButton("STUDY REPORT TODAY 📋", callback_data='today_report')]
+            [InlineKeyboardButton("STUDY REPORT TODAY 📋", callback_data='today_report')],
+            [InlineKeyboardButton("LAST SESSION REPORT 📄", callback_data='last_session_report')]
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
         
@@ -2143,7 +2152,7 @@ class TelegramBot:
         
         return await self.show_subject_selection(update, context)
 
-    async def handle_custom_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+   async def handle_custom_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle custom goal time input."""
         self.record_activity()
         try:
@@ -2859,6 +2868,90 @@ class TelegramBot:
                 should_delete=True
             )
             return CHOOSING_MAIN_MENU
+    
+    async def get_last_session_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Generate and send the last completed session report."""
+        self.record_activity()
+        
+        # Handle callback query if this was triggered by button
+        if update.callback_query:
+            query = update.callback_query
+            await query.answer()
+            
+            # Check if we're in a topic/thread
+            if update.callback_query.message and update.callback_query.message.is_topic_message:
+                # Update the thread_id in user_data
+                context.user_data['thread_id'] = update.callback_query.message.message_thread_id
+            
+            try:
+                # Don't delete the main menu message
+                if update.callback_query.message.text != "Welcome to RMT Study Bot! 📚✨":
+                    await query.message.delete()
+            except Exception as e:
+                logger.error(f"Error deleting message: {e}")
+        
+        user = update.effective_user
+        user_name = user.first_name or user.username or "User"
+        
+        await self.send_bot_message(
+            context,
+            update.effective_chat.id,
+            "Retrieving your last study session report... Please wait...",
+            should_delete=True
+        )
+        
+        try:
+            # Get all study sessions for this user
+            all_sessions = self.db.get_user_study_sessions(user.id)
+            
+            if not all_sessions:
+                await self.send_bot_message(
+                    context,
+                    update.effective_chat.id,
+                    "You don't have any study sessions recorded yet. Start studying to generate session reports!",
+                    should_delete=True
+                )
+                return CHOOSING_MAIN_MENU
+            
+            # Find the most recent completed session
+            last_session = max(all_sessions, key=lambda s: s['start_time'])
+            
+            # Generate PDF
+            pdf_buffer = self.pdf_generator.generate_session_report(user_name, last_session)
+            
+            # Send the PDF file
+            await self.send_document(
+                context,
+                update.effective_chat.id,
+                pdf_buffer,
+                filename=f"Last Session Report - {user_name}, RMT.pdf",
+                caption=f"Here's your last study session report, {user_name}!"
+            )
+            
+            # Show start studying button
+            buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
+            reply_markup = InlineKeyboardMarkup(buttons)
+            
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Ready to start another study session?",
+                reply_markup=reply_markup,
+                should_delete=True
+            )
+            
+        except Exception as e:
+            logger.error(f"Error generating last session report: {e}")
+            import traceback
+            logger.error(traceback.format_exc())  # Print full traceback
+            await self.send_bot_message(
+                context,
+                update.effective_chat.id,
+                "Sorry, there was an error generating your last session report. Please try again later.",
+                should_delete=True
+            )
+        
+        return CHOOSING_MAIN_MENU
         
     async def cancel_operation(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Show cancel confirmation dialog."""
@@ -2943,6 +3036,7 @@ class TelegramBot:
             
         else:
             return context.user_data.get('previous_state', CHOOSING_MAIN_MENU)
+
 # ================== ERROR HANDLER ==================
 async def error_handler(update, context):
     """Handle errors in the telegram bot."""
@@ -3070,7 +3164,9 @@ async def run_bot_with_retries():
                     CallbackQueryHandler(telegram_bot.generate_today_report, pattern='^today_report$'),
                     CallbackQueryHandler(telegram_bot.generate_session_report, pattern='^report_session$'),
                     CallbackQueryHandler(telegram_bot.generate_day_report, pattern='^report_day$'),
-                    CallbackQueryHandler(telegram_bot.generate_overall_progress_report, pattern='^report_overall$')
+                    CallbackQueryHandler(telegram_bot.generate_overall_progress_report, pattern='^report_overall$'),
+                    # Add the new handler for last session report
+                    CallbackQueryHandler(telegram_bot.get_last_session_report, pattern='^last_session_report$')
                 ],
                 states={
                     CONFIRMING_CANCEL: [
@@ -3083,7 +3179,9 @@ async def run_bot_with_retries():
                         CallbackQueryHandler(telegram_bot.generate_today_report, pattern='^today_report$'),
                         CallbackQueryHandler(telegram_bot.generate_session_report, pattern='^report_session$'),
                         CallbackQueryHandler(telegram_bot.generate_day_report, pattern='^report_day$'),
-                        CallbackQueryHandler(telegram_bot.generate_overall_progress_report, pattern='^report_overall$')
+                        CallbackQueryHandler(telegram_bot.generate_overall_progress_report, pattern='^report_overall$'),
+                        # Add the new handler for last session report
+                        CallbackQueryHandler(telegram_bot.get_last_session_report, pattern='^last_session_report$')
                     ],
                     SETTING_GOAL: [
                         CallbackQueryHandler(telegram_bot.handle_goal_selection, pattern='^goal_'),
