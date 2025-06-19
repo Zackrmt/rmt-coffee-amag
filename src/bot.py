@@ -2199,6 +2199,24 @@ class TelegramBot:
         if user_id in self.pending_sessions:
             del self.pending_sessions[user_id]
 
+    async def update_thread_context(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Update thread context from current update if available."""
+        # Check for thread ID in various places
+        thread_id = None
+        
+        if update.message and update.message.is_topic_message:
+            thread_id = update.message.message_thread_id
+        elif update.callback_query and update.callback_query.message and update.callback_query.message.is_topic_message:
+            thread_id = update.callback_query.message.message_thread_id
+        elif update.effective_message and update.effective_message.is_topic_message:
+            thread_id = update.effective_message.message_thread_id
+        
+        if thread_id:
+            context.user_data['thread_id'] = thread_id
+            context.user_data['current_thread_id'] = thread_id
+            return True
+        return False
+
     async def send_bot_message(
         self, 
         context: ContextTypes.DEFAULT_TYPE,
@@ -2211,11 +2229,22 @@ class TelegramBot:
         # Update last activity timestamp
         self.record_activity()
         
+        # IMPROVED THREAD HANDLING: Get thread_id from multiple possible sources
         thread_id = None
+        
+        # Try to get thread_id from context.user_data
         if 'thread_id' in context.user_data:
             thread_id = context.user_data['thread_id']
-        elif context.user_data.get('current_thread_id'):
+        elif 'current_thread_id' in context.user_data:
             thread_id = context.user_data['current_thread_id']
+        
+        # If we have an active thread from the update, prefer that
+        if hasattr(context, 'update') and context.update:
+            if context.update.effective_message and context.update.effective_message.is_topic_message:
+                thread_id = context.update.effective_message.message_thread_id
+                # Also update user_data for future use
+                context.user_data['thread_id'] = thread_id
+                context.user_data['current_thread_id'] = thread_id
         
         # Log the thread_id for debugging
         if thread_id:
@@ -2249,12 +2278,22 @@ class TelegramBot:
         """Send a document with proper thread ID handling."""
         self.record_activity()
         
-        # Get thread_id from user_data if available
+        # IMPROVED THREAD HANDLING: Get thread_id from multiple possible sources
         thread_id = None
+        
+        # Try to get thread_id from context.user_data
         if 'thread_id' in context.user_data:
             thread_id = context.user_data['thread_id']
-        elif context.user_data.get('current_thread_id'):
+        elif 'current_thread_id' in context.user_data:
             thread_id = context.user_data['current_thread_id']
+        
+        # If we have an active thread from the update, prefer that
+        if hasattr(context, 'update') and context.update:
+            if context.update.effective_message and context.update.effective_message.is_topic_message:
+                thread_id = context.update.effective_message.message_thread_id
+                # Also update user_data for future use
+                context.user_data['thread_id'] = thread_id
+                context.user_data['current_thread_id'] = thread_id
         
         # Send the document with thread_id if in a topic
         message = await context.bot.send_document(
@@ -2295,19 +2334,34 @@ class TelegramBot:
         await self.cleanup_messages(update, context)
         self.record_activity()
         
-        # Store the thread_id if the message is in a topic
-        # This is the key part that needs fixing - ensure we capture message_thread_id
+        # IMPROVED THREAD HANDLING: Check for thread context from various sources
+        thread_id = None
+        
+        # Check if the message is in a topic/thread
         if update.message and update.message.is_topic_message:
-            context.user_data['thread_id'] = update.message.message_thread_id
-            logger.info(f"Started in thread {update.message.message_thread_id}")
+            thread_id = update.message.message_thread_id
+            logger.info(f"Started in thread {thread_id} (from message)")
+        
+        # Check if the message has thread info in the effective_message
         elif update.effective_message and update.effective_message.is_topic_message:
-            # This catches cases when clicking on old messages in threads
-            context.user_data['thread_id'] = update.effective_message.message_thread_id
-            logger.info(f"Started in thread (from effective_message) {update.effective_message.message_thread_id}")
+            thread_id = update.effective_message.message_thread_id
+            logger.info(f"Started in thread {thread_id} (from effective_message)")
+        
+        # Check if there's a thread_id from a previous conversation stored in user_data
+        elif 'thread_id' in context.user_data:
+            thread_id = context.user_data['thread_id']
+            logger.info(f"Using stored thread_id {thread_id} from user_data")
+        
+        # Store or update the thread_id
+        if thread_id:
+            context.user_data['thread_id'] = thread_id
+            context.user_data['current_thread_id'] = thread_id
         else:
-            # Clear any existing thread_id if this is in main chat
+            # Clear any existing thread_id if this is definitely in main chat
             if 'thread_id' in context.user_data:
                 del context.user_data['thread_id']
+            if 'current_thread_id' in context.user_data:
+                del context.user_data['current_thread_id']
         
         # Modified buttons array to include the "LAST SESSION REPORT" button
         buttons = [
@@ -2320,6 +2374,7 @@ class TelegramBot:
         
         welcome_text = "Welcome to RMT Study Bot! 📚✨"
         
+        # This send_bot_message method will handle thread_id properly
         message = await self.send_bot_message(
             context,
             update.effective_chat.id,
@@ -2337,14 +2392,7 @@ class TelegramBot:
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         
-        # Get thread_id from either message or effective_message
-        thread_id = None
-        if update.message and update.message.is_topic_message:
-            thread_id = update.message.message_thread_id
-        elif update.effective_message and update.effective_message.is_topic_message:
-            thread_id = update.effective_message.message_thread_id
-        
-        # Create a pending session
+        # Create a pending session with proper thread_id
         self.pending_sessions[user_id] = PendingSession(
             user_id=user_id,
             chat_id=chat_id,
