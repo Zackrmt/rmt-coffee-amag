@@ -2152,7 +2152,7 @@ class TelegramBot:
         
         return await self.show_subject_selection(update, context)
 
-   async def handle_custom_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    async def handle_custom_goal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Handle custom goal time input."""
         self.record_activity()
         try:
