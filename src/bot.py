@@ -415,10 +415,10 @@ class PDFReportGenerator:
     def __init__(self):
         self.styles = getSampleStyleSheet()
         
-        # Define pastel color palette
+        # Define pastel color palette - updated with pastel pink for date header
         self.pastel_colors = {
             'primary': colors.Color(0.6, 0.8, 0.9),        # Pastel blue
-            'secondary': colors.Color(0.9, 0.8, 0.6),      # Pastel orange/tan
+            'secondary': colors.Color(0.9, 0.7, 0.8),      # Pastel pink (updated from orange)
             'accent1': colors.Color(0.8, 0.9, 0.8),        # Pastel green
             'accent2': colors.Color(0.9, 0.8, 0.9),        # Pastel purple
             'accent3': colors.Color(0.9, 0.9, 0.7),        # Pastel yellow
@@ -469,6 +469,17 @@ class PDFReportGenerator:
             fontName='Helvetica'
         ))
         
+        # Added smaller text style for table headers
+        self.styles.add(ParagraphStyle(
+            name='RMT_TableHeaderSmall',
+            parent=self.styles['Normal'],
+            fontSize=7,  # Smaller font size for table headers
+            spaceAfter=0,
+            leading=8,
+            fontName='Helvetica-Bold',
+            alignment=1  # Center alignment
+        ))
+        
         self.styles.add(ParagraphStyle(
             name='RMT_Footer',
             parent=self.styles['Normal'],
@@ -496,6 +507,17 @@ class PDFReportGenerator:
             spaceAfter=6,
             spaceBefore=12
         ))
+        
+        # Add style for AI insights section
+        self.styles.add(ParagraphStyle(
+            name='RMT_AIInsight',
+            parent=self.styles['Normal'],
+            fontSize=10,
+            spaceAfter=8,
+            leading=14,
+            fontName='Helvetica-Oblique',
+            textColor=colors.Color(0.3, 0.3, 0.6)  # Soft blue-purple for AI text
+        ))
     
     def _remove_emojis(self, subject):
         """Remove emojis from subject names."""
@@ -520,6 +542,94 @@ class PDFReportGenerator:
         b = int(rgb_color.blue * 255)
         return f"#{r:02x}{g:02x}{b:02x}"
         
+    def _generate_ai_insights(self, user_name, sessions, sessions_by_date, subject_times, total_study_time, total_break_time):
+        """Generate AI insights based on study data."""
+        insights = []
+        
+        # Get some basic stats for analysis
+        total_days = len(sessions_by_date)
+        first_date = min(sessions_by_date.keys())
+        last_date = max(sessions_by_date.keys())
+        days_span = (last_date - first_date).days + 1
+        study_consistency = total_days / max(1, days_span) * 100
+        
+        # Overall consistency insight
+        if study_consistency > 80:
+            insights.append(f"You've been remarkably consistent, studying on {total_days} out of {days_span} days ({study_consistency:.1f}%)! This strong routine is a key factor in long-term retention and knowledge building.")
+        elif study_consistency > 50:
+            insights.append(f"You've maintained good study consistency, with sessions on {total_days} out of {days_span} days ({study_consistency:.1f}%). Creating even more regular habits could further boost your learning.")
+        else:
+            insights.append(f"Your study schedule shows opportunities for more consistency, with sessions on {total_days} out of {days_span} days ({study_consistency:.1f}%). Establishing a more regular routine could help strengthen knowledge retention.")
+        
+        # Subject concentration analysis
+        if subject_times:
+            top_subject = max(subject_times.items(), key=lambda x: x[1])
+            top_percentage = (top_subject[1] / total_study_time) * 100 if total_study_time > 0 else 0
+            
+            if len(subject_times) > 3:
+                if top_percentage > 50:
+                    insights.append(f"You've dedicated {top_percentage:.1f}% of your study time to {top_subject[0]}. While focus is good, consider if your other subjects need more attention for balanced preparation.")
+                else:
+                    insights.append(f"You've maintained a good balance across {len(subject_times)} subjects, with {top_subject[0]} receiving the most focus at {top_percentage:.1f}% of your time.")
+            elif len(subject_times) > 1:
+                insights.append(f"Your focus has been primarily on {len(subject_times)} subjects. Consider if this aligns with your curriculum needs or if other areas should be incorporated.")
+            else:
+                insights.append(f"You've focused exclusively on {top_subject[0]}. If you're studying for multiple subjects, consider expanding your study sessions to cover more areas.")
+        
+        # Study-break ratio analysis
+        if total_break_time > 0:
+            study_break_ratio = total_study_time / total_break_time
+            if study_break_ratio > 8:
+                insights.append(f"Your study-to-break ratio is very high at {study_break_ratio:.1f}:1. Research suggests that incorporating more short breaks can improve focus and retention.")
+            elif study_break_ratio > 4:
+                insights.append(f"Your study-to-break ratio of {study_break_ratio:.1f}:1 shows disciplined focus. This is a good balance, though ensure your breaks are refreshing enough.")
+            elif study_break_ratio > 2:
+                insights.append(f"Your study-to-break ratio of {study_break_ratio:.1f}:1 demonstrates a good balance between focused work and needed rest.")
+            else:
+                insights.append(f"Your study-to-break ratio of {study_break_ratio:.1f}:1 shows frequent breaks. While breaks are important, consider if slightly longer focused sessions might improve depth of learning.")
+        else:
+            insights.append("You haven't recorded any breaks in your study sessions. Short breaks can actually improve overall retention and focus - consider the Pomodoro technique (25 minutes study, 5 minutes break).")
+        
+        # Study pattern analysis
+        if total_days >= 3:
+            # Calculate average study time by day of week
+            day_of_week_times = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0}  # Mon-Sun
+            day_of_week_counts = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0}
+            
+            for date, day_sessions in sessions_by_date.items():
+                day_of_week = date.weekday()
+                day_time = sum(session['total_study_time'] for session in day_sessions)
+                day_of_week_times[day_of_week] += day_time
+                day_of_week_counts[day_of_week] += 1
+            
+            # Find best day
+            best_day_idx = max(day_of_week_times.items(), key=lambda x: x[1] if day_of_week_counts[x[0]] > 0 else 0)[0]
+            best_day_avg = day_of_week_times[best_day_idx] / max(1, day_of_week_counts[best_day_idx])
+            
+            days = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays"]
+            insights.append(f"Your most productive day appears to be {days[best_day_idx]}, with an average study time of {self._format_time(best_day_avg)}. Consider using this insight when planning your most challenging study topics.")
+        
+        # Progress over time
+        if total_days >= 7:
+            # Check if study time is increasing or decreasing over time
+            sorted_dates = sorted(sessions_by_date.keys())
+            if len(sorted_dates) >= 4:
+                first_half = sorted_dates[:len(sorted_dates)//2]
+                second_half = sorted_dates[len(sorted_dates)//2:]
+                
+                first_half_avg = sum(sum(s['total_study_time'] for s in sessions_by_date[date]) for date in first_half) / len(first_half)
+                second_half_avg = sum(sum(s['total_study_time'] for s in sessions_by_date[date]) for date in second_half) / len(second_half)
+                
+                if second_half_avg > first_half_avg * 1.2:
+                    insights.append(f"Your study time has been increasing over time - great job building momentum! Your average daily study time increased from {self._format_time(first_half_avg)} to {self._format_time(second_half_avg)}.")
+                elif first_half_avg > second_half_avg * 1.2:
+                    insights.append(f"Your study time has been decreasing over time. Your average daily study time dropped from {self._format_time(first_half_avg)} to {self._format_time(second_half_avg)}. This could be due to increased efficiency or other factors.")
+        
+        # Add a personalized recommendation
+        insights.append(f"{user_name}, based on your overall patterns, consider setting a goal of consistent daily study blocks, focusing on your weaker subjects while maintaining your strengths.")
+        
+        return insights
+    
     def generate_session_report(self, user_name, session):
         """Generate a PDF report for a single study session."""
         buffer = io.BytesIO()
@@ -530,8 +640,9 @@ class PDFReportGenerator:
         # Clean subject name by removing emojis
         clean_subject = self._remove_emojis(session['subject'])
         
-        # Title
-        title = Paragraph(f"Study Session Report", self.styles['RMT_ReportTitle'])
+        # UPDATED: Title now includes report type
+        report_type = "CURRENT SESSION" if is_current else "LAST SESSION"
+        title = Paragraph(f"{user_name}, RMT ({report_type} Report)", self.styles['RMT_ReportTitle'])
         story.append(title)
         
         # User - reduce spacing after user subtitle
@@ -655,13 +766,15 @@ class PDFReportGenerator:
         # Use A5 instead of A7 for better readability
         doc = SimpleDocTemplate(buffer, pagesize=A5)
         story = []
-        
-        # Title
-        title = Paragraph(f"Daily Study Report", self.styles['RMT_ReportTitle'])
+
+        # UPDATED: Format the date properly for the title
+        formatted_date = date.strftime('%B %d')
+        title = Paragraph(f"{user_name}, RMT (DAILY REPORT for {formatted_date})", self.styles['RMT_ReportTitle'])
         story.append(title)
         
-        # User and Date
-        user_date = Paragraph(f"{user_name}, RMT<br/>{date.strftime('%Y-%m-%d')}", self.styles['RMT_ReportSubtitle'])
+        # User and Date - updated date format to Month Day, Year
+        formatted_date = date.strftime('%B %d, %Y')  # Format date as "June 19, 2025"
+        user_date = Paragraph(f"{user_name}, RMT<br/>{formatted_date}", self.styles['RMT_ReportSubtitle'])
         story.append(user_date)
         story.append(Spacer(1, 0.3*inch))
         
@@ -930,7 +1043,7 @@ class PDFReportGenerator:
             ['Total Study Time', self._format_time(total_study_time)],
             ['Total Break Time', self._format_time(total_break_time)],
             ['Days Studied', str(total_days)],
-            ['Study Span', f"{days_span} days ({first_date.strftime('%Y-%m-%d')} to {last_date.strftime('%Y-%m-%d')})"],
+            ['Study Span', f"{days_span} days ({first_date.strftime('%B %d, %Y')} to {last_date.strftime('%B %d, %Y')})"],
             ['Avg. Study Time/Day', self._format_time(total_study_time / max(1, total_days))],
             ['Total Sessions', str(len(sessions))]
         ]
@@ -966,6 +1079,34 @@ class PDFReportGenerator:
         story.append(stats_table)
         story.append(Spacer(1, 0.3*inch))
         
+        # Add AI Insight section
+        story.append(PageBreak())
+        insight_title = Paragraph("A.I. Insight", self.styles['RMT_SectionHeader'])
+        story.append(insight_title)
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Calculate subject times for insights
+        subject_times = {}
+        for session in sessions:
+            subject = session['subject']
+            if subject not in subject_times:
+                subject_times[subject] = 0
+            subject_times[subject] += session['total_study_time']
+        
+        # Generate AI insights
+        insights = self._generate_ai_insights(user_name, sessions, sessions_by_date, 
+                                            subject_times, total_study_time, total_break_time)
+        
+        # Add each insight as a paragraph with bullet points
+        for i, insight in enumerate(insights):
+            if i == 0:
+                story.append(Paragraph(f"• {insight}", self.styles['RMT_AIInsight']))
+            else:
+                story.append(Spacer(1, 0.1*inch))
+                story.append(Paragraph(f"• {insight}", self.styles['RMT_AIInsight']))
+        
+        story.append(Spacer(1, 0.3*inch))
+        
         # Move the Daily Timeline to page 2
         story.append(PageBreak())
         timeline_title = Paragraph("Daily Timeline", self.styles['RMT_ReportTitle'])  # Use ReportTitle for prominence
@@ -974,14 +1115,23 @@ class PDFReportGenerator:
         
         # Create date for the report generation
         from datetime import datetime  # Add this import explicitly
-        report_date = datetime.now(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
+        report_date = datetime.now(MANILA_TZ).strftime('%B %d, %Y %I:%M %p')
         report_info = Paragraph(f"Generated on: {report_date} | User: {user_name}", self.styles['RMT_BodyText'])
         story.append(report_info)
         story.append(Spacer(1, 0.2*inch))
         
         # NEW IMPLEMENTATION - Create a single continuous table for all dates
         # First, create the header row that will be repeated for each date
-        header_row = ['Session #', 'Subject', 'Start Time', 'End Time', 'Study Duration', 'Break Duration', 'Idle Duration']
+        # Use paragraphs for header columns to ensure text fits in cells
+        header_row = [
+            Paragraph("Session #", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("Subject", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("Start Time", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("End Time", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("Study Duration", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("Break Duration", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("Idle Duration", self.styles['RMT_TableHeaderSmall'])
+        ]
         
         # Initialize the big timeline table data
         timeline_data = []
@@ -989,10 +1139,11 @@ class PDFReportGenerator:
         # Global row counter for styling
         row_counter = 0
         
-        # Process each date
-        for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
-            # Add date header row spanning all columns
-            date_header = [f"{date.strftime('%Y-%m-%d')}"]
+        # Process each date - CHANGED FROM REVERSE=TRUE TO REVERSE=FALSE
+        for date, day_sessions in sorted(sessions_by_date.items(), reverse=False):
+            # Add date header row spanning all columns - UPDATED DATE FORMAT
+            formatted_date = date.strftime('%B %d, %Y')  # Changed format to "June 19, 2025"
+            date_header = [formatted_date]
             timeline_data.append(date_header + [''] * (len(header_row) - 1))  # Empty cells to fill the row
             row_counter += 1
             
@@ -1050,9 +1201,9 @@ class PDFReportGenerator:
         # Add a grand total at the end if there's more than one date
         if len(sessions_by_date) > 1:
             grand_study_total = sum(sum(session['total_study_time'] for session in day_sessions) 
-                                  for day_sessions in sessions_by_date.values())
+                                 for day_sessions in sessions_by_date.values())
             grand_break_total = sum(sum(session['total_break_time'] for session in day_sessions)
-                                  for day_sessions in sessions_by_date.values())
+                                 for day_sessions in sessions_by_date.values())
             
             # Calculate total time spent (study + break)
             grand_total_session_time = grand_study_total + grand_break_total
@@ -1095,7 +1246,7 @@ class PDFReportGenerator:
         total_row_indices = []
         grand_total_index = None
         
-        for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
+        for date, day_sessions in sorted(sessions_by_date.items(), reverse=False):
             # Date header row
             date_header_indices.append(row_index)
             row_index += 1
@@ -1119,6 +1270,7 @@ class PDFReportGenerator:
         # Apply styling based on row types
         for i in date_header_indices:
             table_style.extend([
+                # CHANGED COLOR FROM SECONDARY TO PASTEL PINK
                 ('BACKGROUND', (0, i), (-1, i), self.pastel_colors['secondary']),
                 ('SPAN', (0, i), (-1, i)),  # Span the date header across all columns
                 ('ALIGN', (0, i), (-1, i), 'CENTER'),
@@ -1199,7 +1351,6 @@ class PDFReportGenerator:
             # Add extra spacing after the chart
             story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
-        # The rest of the function (daily study time chart, subject breakdown, etc.) remains unchanged
         # Daily study time chart - add to a new page
         story.append(PageBreak())
         daily_chart_title = Paragraph("Daily Study Time", self.styles['RMT_SectionHeader'])
@@ -1221,7 +1372,8 @@ class PDFReportGenerator:
         bc.width = 400
         bc.data = [daily_data]
         bc.strokeColor = colors.black
-        bc.fillColor = self.pastel_colors['primary']
+        # CHANGED to use pastel color
+        bc.fillColor = self.pastel_colors['chart1']
         
         bc.valueAxis.valueMin = 0
         bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
@@ -1391,6 +1543,7 @@ class PDFReportGenerator:
                 bc.width = 400
                 bc.data = [daily_data]
                 bc.strokeColor = colors.black
+                # CHANGED to use pastel color instead of default red
                 bc.fillColor = self.pastel_colors['secondary']
                 
                 bc.valueAxis.valueMin = 0
@@ -1422,8 +1575,9 @@ class PDFReportGenerator:
                 
                 # Create session tables for each date
                 for date, day_sessions in sorted(subject_sessions_by_date.items(), reverse=True):
-                    # Date header
-                    date_header = Paragraph(f"{date.strftime('%Y-%m-%d')}", self.styles['RMT_BodyText'])
+                    # Date header - UPDATED DATE FORMAT
+                    formatted_date = date.strftime('%B %d, %Y')
+                    date_header = Paragraph(f"{formatted_date}", self.styles['RMT_BodyText'])
                     story.append(date_header)
                     
                     # Create session table for this date
@@ -1947,6 +2101,51 @@ class TelegramBot:
         
         # Initialize Google Drive DB
         self.db.initialize()
+        
+    # Add this new handler to intercept all commands
+    async def thread_command_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Pre-handler for commands to maintain thread context"""
+        user_id = update.effective_user.id
+        message = update.effective_message
+        
+        # If message is in a thread, update the user's thread mapping
+        if message and message.is_topic_message:
+            thread_id = message.message_thread_id
+            self.user_thread_map[user_id] = thread_id
+            logger.info(f"Updated thread mapping for user {user_id} to thread {thread_id}")
+        
+        # If command is in general chat but we know this user has a thread, delete the command and show guidance
+        elif user_id in self.user_thread_map:
+            thread_id = self.user_thread_map[user_id]
+            
+            # Try to delete the command message from general chat if possible
+            try:
+                await message.delete()
+            except Exception as e:
+                logger.error(f"Could not delete message: {e}")
+            
+            # Send a notice in the proper thread
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"Please use commands within this thread. I've moved our conversation here.",
+                message_thread_id=thread_id
+            )
+            
+            # Now send the same command to the bot in the right thread context
+            command = message.text
+            if command:
+                # Store the context for thread in user data
+                context.user_data['thread_id'] = thread_id
+                context.user_data['current_thread_id'] = thread_id
+                
+                # For /start command, just call the start handler directly
+                if command == "/start":
+                    await self.start(update, context)
+                    return True
+            
+            return True  # Command handled
+        
+        return False  # Let command proceed normally
 
     async def reset_user_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Reset/delete user data from the database."""
@@ -2045,6 +2244,24 @@ class TelegramBot:
         if user_id in self.pending_sessions:
             del self.pending_sessions[user_id]
 
+    async def update_thread_context(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Update thread context from current update if available."""
+        # Check for thread ID in various places
+        thread_id = None
+        
+        if update.message and update.message.is_topic_message:
+            thread_id = update.message.message_thread_id
+        elif update.callback_query and update.callback_query.message and update.callback_query.message.is_topic_message:
+            thread_id = update.callback_query.message.message_thread_id
+        elif update.effective_message and update.effective_message.is_topic_message:
+            thread_id = update.effective_message.message_thread_id
+        
+        if thread_id:
+            context.user_data['thread_id'] = thread_id
+            context.user_data['current_thread_id'] = thread_id
+            return True
+        return False
+
     async def send_bot_message(
         self, 
         context: ContextTypes.DEFAULT_TYPE,
@@ -2057,11 +2274,22 @@ class TelegramBot:
         # Update last activity timestamp
         self.record_activity()
         
+        # IMPROVED THREAD HANDLING: Get thread_id from multiple possible sources
         thread_id = None
+        
+        # Try to get thread_id from context.user_data
         if 'thread_id' in context.user_data:
             thread_id = context.user_data['thread_id']
-        elif context.user_data.get('current_thread_id'):
+        elif 'current_thread_id' in context.user_data:
             thread_id = context.user_data['current_thread_id']
+        
+        # If we have an active thread from the update, prefer that
+        if hasattr(context, 'update') and context.update:
+            if context.update.effective_message and context.update.effective_message.is_topic_message:
+                thread_id = context.update.effective_message.message_thread_id
+                # Also update user_data for future use
+                context.user_data['thread_id'] = thread_id
+                context.user_data['current_thread_id'] = thread_id
         
         # Log the thread_id for debugging
         if thread_id:
@@ -2095,12 +2323,22 @@ class TelegramBot:
         """Send a document with proper thread ID handling."""
         self.record_activity()
         
-        # Get thread_id from user_data if available
+        # IMPROVED THREAD HANDLING: Get thread_id from multiple possible sources
         thread_id = None
+        
+        # Try to get thread_id from context.user_data
         if 'thread_id' in context.user_data:
             thread_id = context.user_data['thread_id']
-        elif context.user_data.get('current_thread_id'):
+        elif 'current_thread_id' in context.user_data:
             thread_id = context.user_data['current_thread_id']
+        
+        # If we have an active thread from the update, prefer that
+        if hasattr(context, 'update') and context.update:
+            if context.update.effective_message and context.update.effective_message.is_topic_message:
+                thread_id = context.update.effective_message.message_thread_id
+                # Also update user_data for future use
+                context.user_data['thread_id'] = thread_id
+                context.user_data['current_thread_id'] = thread_id
         
         # Send the document with thread_id if in a topic
         message = await context.bot.send_document(
@@ -2141,19 +2379,34 @@ class TelegramBot:
         await self.cleanup_messages(update, context)
         self.record_activity()
         
-        # Store the thread_id if the message is in a topic
-        # This is the key part that needs fixing - ensure we capture message_thread_id
+        # IMPROVED THREAD HANDLING: Check for thread context from various sources
+        thread_id = None
+        
+        # Check if the message is in a topic/thread
         if update.message and update.message.is_topic_message:
-            context.user_data['thread_id'] = update.message.message_thread_id
-            logger.info(f"Started in thread {update.message.message_thread_id}")
+            thread_id = update.message.message_thread_id
+            logger.info(f"Started in thread {thread_id} (from message)")
+        
+        # Check if the message has thread info in the effective_message
         elif update.effective_message and update.effective_message.is_topic_message:
-            # This catches cases when clicking on old messages in threads
-            context.user_data['thread_id'] = update.effective_message.message_thread_id
-            logger.info(f"Started in thread (from effective_message) {update.effective_message.message_thread_id}")
+            thread_id = update.effective_message.message_thread_id
+            logger.info(f"Started in thread {thread_id} (from effective_message)")
+        
+        # Check if there's a thread_id from a previous conversation stored in user_data
+        elif 'thread_id' in context.user_data:
+            thread_id = context.user_data['thread_id']
+            logger.info(f"Using stored thread_id {thread_id} from user_data")
+        
+        # Store or update the thread_id
+        if thread_id:
+            context.user_data['thread_id'] = thread_id
+            context.user_data['current_thread_id'] = thread_id
         else:
-            # Clear any existing thread_id if this is in main chat
+            # Clear any existing thread_id if this is definitely in main chat
             if 'thread_id' in context.user_data:
                 del context.user_data['thread_id']
+            if 'current_thread_id' in context.user_data:
+                del context.user_data['current_thread_id']
         
         # Modified buttons array to include the "LAST SESSION REPORT" button
         buttons = [
@@ -2166,6 +2419,7 @@ class TelegramBot:
         
         welcome_text = "Welcome to RMT Study Bot! 📚✨"
         
+        # This send_bot_message method will handle thread_id properly
         message = await self.send_bot_message(
             context,
             update.effective_chat.id,
@@ -2183,14 +2437,7 @@ class TelegramBot:
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         
-        # Get thread_id from either message or effective_message
-        thread_id = None
-        if update.message and update.message.is_topic_message:
-            thread_id = update.message.message_thread_id
-        elif update.effective_message and update.effective_message.is_topic_message:
-            thread_id = update.effective_message.message_thread_id
-        
-        # Create a pending session
+        # Create a pending session with proper thread_id
         self.pending_sessions[user_id] = PendingSession(
             user_id=user_id,
             chat_id=chat_id,
@@ -2670,22 +2917,36 @@ class TelegramBot:
             session_dict = session.to_dict()
             context.user_data['last_session'] = session_dict
             
-            # Add buttons to download study reports
-            buttons = [
-                [
-                    InlineKeyboardButton("THIS SESSION", callback_data='report_session')
-                ]
-            ]
-            report_markup = InlineKeyboardMarkup(buttons)
-            
-            report_msg = await self.send_bot_message(
+            # CHANGED: Instead of showing PDF report options, generate and send the PDF automatically
+            await self.send_bot_message(
                 context,
                 update.effective_chat.id,
-                "Would you like to check your progress report in PDF?",
-                reply_markup=report_markup,
+                "Generating your session report... Please wait...",
                 should_delete=True
             )
             
+            try:
+                # Generate PDF
+                pdf_buffer = self.pdf_generator.generate_session_report(user_name, session_dict)
+                
+                # Send the PDF file with the updated message
+                await self.send_document(
+                    context,
+                    update.effective_chat.id,
+                    pdf_buffer,
+                    filename=f"Session Report - {user_name}, RMT.pdf",
+                    caption=f"Here's your complete study progress report, {user_name}! (attached THIS SESSION PDF)"
+                )
+            except Exception as e:
+                logger.error(f"Error generating session report: {e}")
+                await self.send_bot_message(
+                    context,
+                    update.effective_chat.id,
+                    "Sorry, there was an error generating your session report.",
+                    should_delete=True
+                )
+            
+            # Show button to start a new session
             buttons = [[InlineKeyboardButton("Start New Study Session 📚", callback_data='start_studying')]]
             reply_markup = InlineKeyboardMarkup(buttons)
             
@@ -2905,13 +3166,13 @@ class TelegramBot:
             # Generate PDF
             pdf_buffer = self.pdf_generator.generate_full_report(user_name, all_sessions)
             
-            # Send the PDF file
+            # Send the PDF file with updated caption
             await self.send_document(
                 context,
                 update.effective_chat.id,
                 pdf_buffer,
                 filename=f"Study Progress Report of {user_name}, RMT.pdf",
-                caption=f"Here's your complete study progress report, {user_name}!"
+                caption=f"Here's your complete OVERALL study progress report, {user_name}! 📊"
             )
             
             # Show start studying button
@@ -3317,8 +3578,16 @@ async def run_bot_with_retries():
             telegram_bot = TelegramBot()
             telegram_bot.application = application
             
+            # Initialize user_thread_map for thread handling
+            telegram_bot.user_thread_map = {}
+            
             # Store in shared state
             shared_state.telegram_bot = telegram_bot
+            
+            # IMPORTANT NEW HANDLER: Add thread command handler with negative group number to ensure it runs first
+            application.add_handler(
+                TypeHandler(Update, telegram_bot.thread_command_handler), group=-1
+            )
             
             # Add command handlers
             application.add_handler(CommandHandler('start', telegram_bot.start))
@@ -3511,8 +3780,8 @@ def main():
         
         # Add version and startup info
         logger.info(f"Starting RMT Study Bot v1.2.0 - 24/7 Edition with Google Drive Persistence")
-        logger.info(f"Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"Current User's Login: {CURRENT_USER}")
+        logger.info(f"Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-06-19 20:30:00")
+        logger.info(f"Current User's Login: Zackrmtno")
         logger.info(f"Process ID: {os.getpid()}")
         
         # Run the bot with retries
@@ -3524,6 +3793,125 @@ def main():
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
         sys.exit(1)
+
+async def run_bot_with_retries():
+    """Run the bot with automatic reconnection on failures"""
+    max_retries = 10
+    retry_count = 0
+    retry_delay = 5  # seconds
+    
+    while retry_count < max_retries:
+        try:
+            logger.info(f"Starting bot (attempt {retry_count + 1}/{max_retries})")
+            
+            # Initialize persistence and bot
+            persistence = PicklePersistence(filepath=PERSISTENCE_PATH)
+            application = Application.builder().token(TOKEN).persistence(persistence).build()
+            
+            # Initialize bot instance
+            bot = TelegramBot()
+            
+            # Create HTTP ping server for keepalive
+            keepalive = KeepaliveServer()
+            keepalive_task = asyncio.create_task(keepalive.start())
+            
+            # Create self-ping task
+            self_ping_task = asyncio.create_task(self_ping())
+            
+            # Add error handler
+            application.add_error_handler(error_handler)
+            
+            # IMPORTANT NEW HANDLER: Add thread command handler with negative group number to ensure it runs first
+            application.add_handler(
+                TypeHandler(Update, bot.thread_command_handler), group=-1
+            )
+            
+            # Register command handlers
+            application.add_handler(ConversationHandler(
+                entry_points=[
+                    CommandHandler('start', bot.start),
+                    CommandHandler('help', bot.help_command),
+                    CommandHandler('reset', bot.reset_user_data),
+                    CommandHandler('debug', bot.debug_command),
+                ],
+                states={
+                    CHOOSING_MAIN_MENU: [
+                        CallbackQueryHandler(bot.init_subject_choice, pattern='^start_studying$'),
+                        CallbackQueryHandler(bot.generate_overall_progress_report, pattern='^overall_progress$'),
+                        CallbackQueryHandler(bot.generate_daily_report, pattern='^today_report$'),
+                        CallbackQueryHandler(bot.generate_last_session_report, pattern='^last_session_report$'),
+                    ],
+                    ENTERING_SUBJECT: [
+                        MessageHandler(filters.TEXT & ~filters.COMMAND, bot.set_subject),
+                        CallbackQueryHandler(bot.handle_start_back, pattern='^back$'),
+                    ],
+                    SETTING_GOAL_TIME: [
+                        CallbackQueryHandler(bot.set_goal_time, pattern='^goal_time_.+'),
+                        CallbackQueryHandler(bot.skip_goal_time, pattern='^skip_goal$'),
+                        CallbackQueryHandler(bot.handle_goal_back, pattern='^back$'),
+                    ],
+                    STUDYING: [
+                        CallbackQueryHandler(bot.start_break, pattern='^start_break$'),
+                        CallbackQueryHandler(bot.end_session, pattern='^end_session$'),
+                    ],
+                    ON_BREAK: [
+                        CallbackQueryHandler(bot.end_break, pattern='^end_break$'),
+                        CallbackQueryHandler(bot.end_session_from_break, pattern='^end_session$'),
+                    ],
+                    CONFIRMATION: [
+                        CallbackQueryHandler(bot.handle_reset_confirmation, pattern='^confirm_reset$|^cancel_reset$'),
+                    ],
+                },
+                fallbacks=[
+                    CommandHandler('cancel', bot.cancel),
+                    CommandHandler('reset', bot.reset_user_data),
+                ],
+                name="main_conversation",
+                persistent=True,
+            ))
+            
+            # Register other handlers
+            application.add_handler(CommandHandler('debug', bot.debug_command))
+            application.add_handler(CommandHandler('cancel', bot.cancel))
+            application.add_handler(CommandHandler('help', bot.help_command))
+            
+            # Add callback handler for export PDF buttons
+            application.add_handler(CallbackQueryHandler(bot.generate_session_pdf, pattern='^generate_session_pdf$'))
+            application.add_handler(CallbackQueryHandler(bot.cancel_pdf_generation, pattern='^cancel_pdf$'))
+            
+            # Start polling
+            await application.initialize()
+            await force_clear_telegram_updates(TOKEN)  # Clear any pending updates
+            await application.start()
+            await application.updater.start_polling()
+            
+            # Keep the bot running until it's interrupted
+            try:
+                await application.updater.wait_closed()  
+            except asyncio.CancelledError:
+                logger.info("Polling cancelled, stopping bot...")
+                pass
+                
+            # Cleanup tasks
+            keepalive_task.cancel()
+            self_ping_task.cancel()
+            await application.stop()
+            await application.shutdown()
+            
+            # Break out of the retry loop if we've stopped cleanly
+            break
+            
+        except Exception as e:
+            retry_count += 1
+            logger.error(f"Bot crashed: {str(e)}")
+            logger.info(f"Retrying in {retry_delay} seconds...")
+            await asyncio.sleep(retry_delay)
+            
+            # Increase the delay for next retry (exponential backoff)
+            retry_delay = min(retry_delay * 2, 300)  # Cap at 5 minutes
+    
+    if retry_count >= max_retries:
+        logger.critical("Maximum retry attempts reached. Bot is shutting down.")
 
 if __name__ == '__main__':
     main()
