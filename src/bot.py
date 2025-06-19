@@ -2102,82 +2102,75 @@ class TelegramBot:
         
         # Initialize Google Drive DB
         self.db.initialize()
+                 
+    async def thread_command_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Pre-handler for commands to maintain thread context"""
+        if not update.effective_user:
+            return False  # Let the update proceed if there's no user
+            
+        user_id = update.effective_user.id
+        message = update.effective_message
         
-      
-        # Fix the thread command handler to properly let commands through and debug thread mapping
-        async def thread_command_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-            """Pre-handler for commands to maintain thread context"""
-            if not update.effective_user:
-                return False  # Let the update proceed if there's no user
-                
-            user_id = update.effective_user.id
-            message = update.effective_message
+        # Debug logging
+        logger.info(f"thread_command_handler called for user {user_id}")
+        
+        # If message is in a thread, update the user's thread mapping
+        if message and message.is_topic_message:
+            thread_id = message.message_thread_id
+            self.user_thread_map[user_id] = thread_id
+            logger.info(f"Updated thread mapping for user {user_id} to thread {thread_id}")
             
-            # Debug logging to check what's happening
-            logger.info(f"thread_command_handler called for user {user_id}")
-            if hasattr(self, 'user_thread_map'):
-                logger.info(f"Current user_thread_map: {self.user_thread_map}")
-            else:
-                logger.error("user_thread_map not initialized!")
-                self.user_thread_map = {}
-                
-            # If message is in a thread, update the user's thread mapping
-            if message and message.is_topic_message:
-                thread_id = message.message_thread_id
-                self.user_thread_map[user_id] = thread_id
-                logger.info(f"Updated thread mapping for user {user_id} to thread {thread_id}")
-                
-                # Store thread_id in user_data for future use
-                context.user_data['thread_id'] = thread_id
-                context.user_data['current_thread_id'] = thread_id
-                
-                # Let the command proceed normally within the thread
-                return False
+            # Store thread_id in user_data for future use
+            context.user_data['thread_id'] = thread_id
+            context.user_data['current_thread_id'] = thread_id
             
-            # If command is in general chat but we know this user has a thread, redirect it
-            elif user_id in self.user_thread_map:
-                thread_id = self.user_thread_map[user_id]
-                logger.info(f"Redirecting command from general chat to thread {thread_id} for user {user_id}")
+            # Let the command proceed normally within the thread
+            return False
+        
+        # If command is in general chat but we know this user has a thread, redirect it
+        elif user_id in self.user_thread_map:
+            thread_id = self.user_thread_map[user_id]
+            logger.info(f"Redirecting command from general chat to thread {thread_id} for user {user_id}")
+            
+            # Try to delete the command message from general chat if possible
+            try:
+                if message and not message.is_topic_message:
+                    await message.delete()
+                    logger.info("Deleted command from general chat")
+            except Exception as e:
+                logger.error(f"Could not delete message: {e}")
+            
+            # If this is a /start command, handle it specially
+            if message and message.text == "/start":
+                logger.info("Handling /start command in thread")
                 
-                # Try to delete the command message from general chat if possible
-                try:
-                    if message and not message.is_topic_message:
-                        await message.delete()
-                        logger.info("Deleted command from general chat")
-                except Exception as e:
-                    logger.error(f"Could not delete message: {e}")
-                
-                # If this is a /start command, handle it specially
-                if message and message.text == "/start":
-                    logger.info("Handling /start command in thread")
-                    
-                    # Send notification in thread
-                    await context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text="I've moved our conversation to this thread. Please use commands here.",
-                        message_thread_id=thread_id
-                    )
-                    
-                    # Store thread_id in context for the command handler
-                    context.user_data['thread_id'] = thread_id
-                    context.user_data['current_thread_id'] = thread_id
-                    
-                    # Call start command directly
-                    await self.start(update, context)
-                    return True
-                
-                # For other commands, just notify user
+                # Send notification in thread
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text="Please use commands in this thread. I've moved our conversation here.",
+                    text="I've moved our conversation to this thread. Please use commands here.",
                     message_thread_id=thread_id
                 )
                 
-                return True  # We've handled it by redirecting
+                # Store thread_id in context for the command handler
+                context.user_data['thread_id'] = thread_id
+                context.user_data['current_thread_id'] = thread_id
+                
+                # Call start command directly
+                await self.start(update, context)
+                return True
             
-            # If no thread context found, let the command process normally
-            logger.info(f"No thread context for user {user_id}, letting command proceed normally")
-            return False
+            # For other commands, just notify user
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="Please use commands in this thread. I've moved our conversation here.",
+                message_thread_id=thread_id
+            )
+            
+            return True  # We've handled it by redirecting
+        
+        # If no thread context found, let the command process normally
+        logger.info(f"No thread context for user {user_id}, letting command proceed normally")
+        return False
 
     async def reset_user_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Reset/delete user data from the database."""
