@@ -649,253 +649,41 @@ class PDFReportGenerator:
         buffer.seek(0)
         return buffer
         
-    def generate_daily_report(self, user_name, date, sessions):
-        """Generate a PDF report for a specific day."""
-        buffer = io.BytesIO()
-        # Use A5 instead of A7 for better readability
-        doc = SimpleDocTemplate(buffer, pagesize=A5)
-        story = []
-        
-        # Title
-        title = Paragraph(f"Daily Study Report", self.styles['RMT_ReportTitle'])
-        story.append(title)
-        
-        # User and Date
-        user_date = Paragraph(f"{user_name}, RMT<br/>{date.strftime('%Y-%m-%d')}", self.styles['RMT_ReportSubtitle'])
-        story.append(user_date)
-        story.append(Spacer(1, 0.3*inch))
-        
-        if not sessions:
-            no_data = Paragraph("No study sessions recorded for this date.", self.styles['RMT_BodyText'])
-            story.append(no_data)
-        else:
-            # Clean subject names by removing emojis
-            for session in sessions:
-                session['subject'] = self._remove_emojis(session['subject'])
-                
-            # Summary statistics
-            total_study_time = sum(session['total_study_time'] for session in sessions)
-            total_break_time = sum(session['total_break_time'] for session in sessions)
-            
-            stats_title = Paragraph("Summary Statistics", self.styles['RMT_SectionHeader'])
-            story.append(stats_title)
-            
-            stats_data = [
-                ['Metric', 'Value'],
-                ['Total Study Time', self._format_time(total_study_time)],
-                ['Total Break Time', self._format_time(total_break_time)],
-                ['Total Sessions', str(len(sessions))]
-            ]
-            
-            ratio = "N/A"
-            if total_break_time > 0:
-                study_minutes = int(total_study_time / 60)
-                break_minutes = int(total_break_time / 60)
-                
-                def gcd(a, b):
-                    while b:
-                        a, b = b, a % b
-                    return a
-                
-                divisor = gcd(study_minutes, break_minutes)
-                if divisor > 0:
-                    ratio = f"{study_minutes//divisor}:{break_minutes//divisor}"
-            
-            stats_data.append(['Study:Break Ratio', ratio])
-            
-            stats_table = Table(stats_data, colWidths=[2*inch, 2*inch])
-            stats_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('BOX', (0, 0), (-1, -1), 1, colors.black),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ]))
-            story.append(stats_table)
-            story.append(Spacer(1, 0.3*inch))
-            
-            # Time distribution chart
-            chart_title = Paragraph("Time Distribution", self.styles['RMT_SectionHeader'])
-            story.append(chart_title)
-            
-            if total_study_time > 0 or total_break_time > 0:
-                # Add page break to put chart on a new page
-                story.append(PageBreak())
-                # Re-add the chart title on the new page
-                chart_title = Paragraph("Time Distribution", self.styles['RMT_SectionHeader'])
-                story.append(chart_title)
-                
-                drawing = Drawing(4*inch, 2.5*inch)  # Increased height
-                pie = Pie()
-                pie.x = 2*inch
-                pie.y = 1.25*inch  # Adjusted y position
-                pie.width = 2*inch
-                pie.height = 2*inch
-                pie.data = [total_study_time, total_break_time]
-                pie.labels = ['Study', 'Break']
-                pie.slices.strokeWidth = 0.5
-                pie.slices[0].fillColor = self.pastel_colors['chart1']
-                pie.slices[1].fillColor = self.pastel_colors['chart2']
-                drawing.add(pie)
-                story.append(drawing)
-                
-                # Add legend with pastel colors
-                total_time = total_study_time + total_break_time
-                if total_time > 0:
-                    legend = Paragraph(
-                        f"<font color='{self._rgb_to_hex(self.pastel_colors['chart1'])}'>■</font> Study: {self._format_time(total_study_time)} ({100*total_study_time/total_time:.1f}%)<br/>"
-                        f"<font color='{self._rgb_to_hex(self.pastel_colors['chart2'])}'>■</font> Break: {self._format_time(total_break_time)} ({100*total_break_time/total_time:.1f}%)",
-                        self.styles['RMT_BodyText']
-                    )
-                    story.append(legend)
-                    
-                # Add extra spacing after the chart
-                story.append(Spacer(1, 0.5*inch))  # Increased spacing
-            
-            # Subject breakdown - put on a new page
-            story.append(PageBreak())
-            subject_title = Paragraph("Subject Breakdown", self.styles['RMT_SectionHeader'])
-            story.append(subject_title)
-            
-            # Group sessions by subject
-            sessions_by_subject = {}
-            for session in sessions:
-                subject = session['subject']
-                if subject not in sessions_by_subject:
-                    sessions_by_subject[subject] = 0
-                sessions_by_subject[subject] += session['total_study_time']
-            
-            if sessions_by_subject:
-                subject_data = [['Subject', 'Time', 'Percentage']]
-                
-                for subject, time in sorted(sessions_by_subject.items(), key=lambda x: x[1], reverse=True):
-                    percentage = (time / total_study_time) * 100 if total_study_time > 0 else 0
-                    subject_data.append([
-                        subject, 
-                        self._format_time(time), 
-                        f"{percentage:.1f}%"
-                    ])
-                
-                subject_table = Table(subject_data, colWidths=[2*inch, 1*inch, 1*inch])
-                subject_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                    ('BOX', (0, 0), (-1, -1), 1, colors.black),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ]))
-                story.append(subject_table)
-            
-            story.append(Spacer(1, 0.3*inch))
-            
-            # Session details - add to a new page
-            story.append(PageBreak())
-            session_title = Paragraph("Session Details", self.styles['RMT_SectionHeader'])
-            story.append(session_title)
-            
-            session_data = [['Subject', 'Start', 'End', 'Duration']]
-            
-            for session in sorted(sessions, key=lambda x: x['start_time']):
-                start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                
-                session_data.append([
-                    session['subject'],
-                    start_time,
-                    end_time,
-                    self._format_time(session['total_study_time'])
-                ])
-            
-            session_table = Table(session_data, colWidths=[1*inch, 1*inch, 1*inch, 1*inch])
-            session_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('BOX', (0, 0), (-1, -1), 1, colors.black),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ]))
-            story.append(session_table)
-        
-        # Add creator footer
-        story.append(Spacer(1, 0.5*inch))
-        footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
-        story.append(footer)
-        
-        # Build PDF
-        doc.build(story)
-        buffer.seek(0)
-        return buffer
-        
-    def generate_full_report(self, user_name, sessions):
-        """Generate a comprehensive PDF report of all study sessions."""
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        story = []
-        
-        # Title
-        title = Paragraph(f"Study Progress Report of {user_name}, RMT", self.styles['RMT_ReportTitle'])
-        story.append(title)
-        story.append(Spacer(1, 0.5*inch))
-        
-        if not sessions:
-            no_data = Paragraph("No study sessions recorded yet.", self.styles['RMT_BodyText'])
-            story.append(no_data)
-            
-            # Add creator footer even when there's no data
-            story.append(Spacer(1, 0.5*inch))
-            footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
-            story.append(footer)
-            
-            doc.build(story)
-            buffer.seek(0)
-            return buffer
-        
+def generate_daily_report(self, user_name, date, sessions):
+    """Generate a PDF report for a specific day."""
+    buffer = io.BytesIO()
+    # Use A5 instead of A7 for better readability
+    doc = SimpleDocTemplate(buffer, pagesize=A5)
+    story = []
+    
+    # Title
+    title = Paragraph(f"Daily Study Report", self.styles['RMT_ReportTitle'])
+    story.append(title)
+    
+    # User and Date
+    user_date = Paragraph(f"{user_name}, RMT<br/>{date.strftime('%Y-%m-%d')}", self.styles['RMT_ReportSubtitle'])
+    story.append(user_date)
+    story.append(Spacer(1, 0.3*inch))
+    
+    if not sessions:
+        no_data = Paragraph("No study sessions recorded for this date.", self.styles['RMT_BodyText'])
+        story.append(no_data)
+    else:
         # Clean subject names by removing emojis
         for session in sessions:
             session['subject'] = self._remove_emojis(session['subject'])
-        
-        # Sort sessions by date
-        sessions.sort(key=lambda x: x['start_time'])
-        
-        # Group sessions by date
-        sessions_by_date = {}
-        for session in sessions:
-            date_key = session['start_time'].date()
-            if date_key not in sessions_by_date:
-                sessions_by_date[date_key] = []
-            sessions_by_date[date_key].append(session)
-        
-        # Calculate overall statistics
+            
+        # Summary statistics
         total_study_time = sum(session['total_study_time'] for session in sessions)
         total_break_time = sum(session['total_break_time'] for session in sessions)
-        total_days = len(sessions_by_date)
-        first_date = min(sessions_by_date.keys())
-        last_date = max(sessions_by_date.keys())
-        days_span = (last_date - first_date).days + 1
         
-        # Add key statistics section
-        stats_title = Paragraph("Key Statistics", self.styles['RMT_SectionHeader'])
+        stats_title = Paragraph("Summary Statistics", self.styles['RMT_SectionHeader'])
         story.append(stats_title)
         
         stats_data = [
             ['Metric', 'Value'],
             ['Total Study Time', self._format_time(total_study_time)],
             ['Total Break Time', self._format_time(total_break_time)],
-            ['Days Studied', str(total_days)],
-            ['Study Span', f"{days_span} days ({first_date.strftime('%Y-%m-%d')} to {last_date.strftime('%Y-%m-%d')})"],
-            ['Avg. Study Time/Day', self._format_time(total_study_time / max(1, total_days))],
             ['Total Sessions', str(len(sessions))]
         ]
         
@@ -915,7 +703,7 @@ class PDFReportGenerator:
         
         stats_data.append(['Study:Break Ratio', ratio])
         
-        stats_table = Table(stats_data, colWidths=[2.5*inch, 2.5*inch])
+        stats_table = Table(stats_data, colWidths=[2*inch, 2*inch])
         stats_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -930,104 +718,23 @@ class PDFReportGenerator:
         story.append(stats_table)
         story.append(Spacer(1, 0.3*inch))
         
-        # Move the Daily Timeline to page 2
-        story.append(PageBreak())
-        timeline_title = Paragraph("Daily Timeline", self.styles['RMT_ReportTitle'])  # Use ReportTitle for prominence
-        story.append(timeline_title)
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Create date for the report generation - Fix the datetime.now issue
-        from datetime import datetime  # Add this import explicitly
-        report_date = datetime.now(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
-        report_info = Paragraph(f"Generated on: {report_date} | User: {user_name}", self.styles['RMT_BodyText'])
-        story.append(report_info)
-        story.append(Spacer(1, 0.2*inch))
-        
-        # Create a grouped timeline by date - NEW IMPLEMENTATION
-        # We'll create a table for each date
-        for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
-            # Date header
-            date_header = Paragraph(f"<b>{date.strftime('%Y-%m-%d')}</b>", self.styles['RMT_SectionHeader'])
-            story.append(date_header)
-            
-            # Create session table for this date
-            session_data = [['Subject', 'Start Time', 'End Time', 'Duration']]  # Header row
-            
-            # Add session rows
-            for session in sorted(day_sessions, key=lambda x: x['start_time']):
-                start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                
-                session_data.append([
-                    session['subject'],
-                    start_time,
-                    end_time,
-                    self._format_time(session['total_study_time'])
-                ])
-            
-            # Calculate day total
-            day_total = sum(session['total_study_time'] for session in day_sessions)
-            
-            # Add total row
-            session_data.append([
-                "<b>Total</b>",
-                "",
-                "",
-                f"<b>{self._format_time(day_total)}</b>"
-            ])
-            
-            # Create and style the table
-            date_table = Table(session_data, colWidths=[2*inch, 1.3*inch, 1.3*inch, 1.2*inch])
-            
-            # Apply styling
-            row_styles = []
-            for i in range(len(session_data)):
-                if i == 0:  # Header row
-                    row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['primary']))
-                    row_styles.append(('TEXTCOLOR', (0, i), (-1, i), colors.white))
-                    row_styles.append(('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'))
-                    row_styles.append(('ALIGN', (0, i), (-1, i), 'CENTER'))
-                elif i == len(session_data) - 1:  # Total row
-                    row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['accent1']))
-                    row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))
-                else:  # Data rows
-                    if i % 2 == 1:  # Alternate row coloring
-                        row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['contrast']))
-                    row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))  # Right-align duration
-                    row_styles.append(('ALIGN', (1, i), (2, i), 'CENTER'))  # Center-align times
-            
-            # General table styling
-            date_table.setStyle(TableStyle([
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('BOX', (0, 0), (-1, -1), 1, colors.black),
-                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                *row_styles
-            ]))
-            
-            story.append(date_table)
-            story.append(Spacer(1, 0.3*inch))  # Add space between date sections
-        
-        # Add a grand total
-        grand_total = sum(sum(session['total_study_time'] for session in day_sessions) 
-                         for day_sessions in sessions_by_date.values())
-        total_text = Paragraph(f"<b>Grand Total: {self._format_time(grand_total)}</b>", self.styles['RMT_BodyText'])
-        story.append(total_text)
-        
-        # Overall time distribution chart - put on a new page
-        story.append(PageBreak())
-        chart_title = Paragraph("Overall Time Distribution", self.styles['RMT_SectionHeader'])
+        # Time distribution chart
+        chart_title = Paragraph("Time Distribution", self.styles['RMT_SectionHeader'])
         story.append(chart_title)
         
         if total_study_time > 0 or total_break_time > 0:
-            drawing = Drawing(5*inch, 3*inch)  # Increased height
+            # Add page break to put chart on a new page
+            story.append(PageBreak())
+            # Re-add the chart title on the new page
+            chart_title = Paragraph("Time Distribution", self.styles['RMT_SectionHeader'])
+            story.append(chart_title)
+            
+            drawing = Drawing(4*inch, 2.5*inch)  # Increased height
             pie = Pie()
-            pie.x = 2.5*inch
-            pie.y = 1.5*inch  # Adjusted y position
-            pie.width = 2.5*inch
-            pie.height = 2.5*inch
+            pie.x = 2*inch
+            pie.y = 1.25*inch  # Adjusted y position
+            pie.width = 2*inch
+            pie.height = 2*inch
             pie.data = [total_study_time, total_break_time]
             pie.labels = ['Study', 'Break']
             pie.slices.strokeWidth = 0.5
@@ -1049,308 +756,757 @@ class PDFReportGenerator:
             # Add extra spacing after the chart
             story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
-        # Daily study time chart - add to a new page
-        story.append(PageBreak())
-        daily_chart_title = Paragraph("Daily Study Time", self.styles['RMT_SectionHeader'])
-        story.append(daily_chart_title)
-        
-        daily_data = []
-        daily_labels = []
-        
-        for date, day_sessions in sorted(sessions_by_date.items()):
-            day_total = sum(session['total_study_time'] for session in day_sessions) / 3600  # Convert to hours
-            daily_data.append(day_total)
-            daily_labels.append(date.strftime("%m/%d"))
-        
-        drawing = Drawing(500, 200)
-        bc = VerticalBarChart()
-        bc.x = 50
-        bc.y = 50
-        bc.height = 125
-        bc.width = 400
-        bc.data = [daily_data]
-        bc.strokeColor = colors.black
-        bc.fillColor = self.pastel_colors['primary']
-        
-        bc.valueAxis.valueMin = 0
-        bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
-        bc.valueAxis.valueStep = 1
-        bc.valueAxis.labelTextFormat = '%0.1f h'
-        bc.categoryAxis.labels.boxAnchor = 'ne'
-        bc.categoryAxis.labels.dx = 8
-        bc.categoryAxis.labels.dy = -2
-        bc.categoryAxis.labels.angle = 30
-        bc.categoryAxis.categoryNames = daily_labels
-        
-        drawing.add(bc)
-        story.append(drawing)
-        story.append(Spacer(1, 0.5*inch))  # Increased spacing
-        
-        # Subject breakdown - add to a new page
+        # Subject breakdown - put on a new page
         story.append(PageBreak())
         subject_title = Paragraph("Subject Breakdown", self.styles['RMT_SectionHeader'])
         story.append(subject_title)
         
-        # Group study time by subject
-        subject_times = {}
+        # Group sessions by subject
+        sessions_by_subject = {}
         for session in sessions:
             subject = session['subject']
-            if subject not in subject_times:
-                subject_times[subject] = 0
-            subject_times[subject] += session['total_study_time']
+            if subject not in sessions_by_subject:
+                sessions_by_subject[subject] = 0
+            sessions_by_subject[subject] += session['total_study_time']
         
-        # Create table for subject breakdown
-        subject_data = [['Subject', 'Total Time', 'Percentage']]
+        if sessions_by_subject:
+            subject_data = [['Subject', 'Time', 'Percentage']]
+            
+            for subject, time in sorted(sessions_by_subject.items(), key=lambda x: x[1], reverse=True):
+                percentage = (time / total_study_time) * 100 if total_study_time > 0 else 0
+                subject_data.append([
+                    subject, 
+                    self._format_time(time), 
+                    f"{percentage:.1f}%"
+                ])
+            
+            subject_table = Table(subject_data, colWidths=[2*inch, 1*inch, 1*inch])
+            subject_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BOX', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(subject_table)
         
-        for subject, time in sorted(subject_times.items(), key=lambda x: x[1], reverse=True):
-            percentage = (time / total_study_time) * 100 if total_study_time > 0 else 0
-            subject_data.append([
-                subject, 
-                self._format_time(time), 
-                f"{percentage:.1f}%"
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Session details - add to a new page
+        story.append(PageBreak())
+        session_title = Paragraph("Session Details", self.styles['RMT_SectionHeader'])
+        story.append(session_title)
+        
+        # UPDATED: Changed to include both Study Duration and Break Duration
+        session_data = [['Subject', 'Start', 'End', 'Study Duration', 'Break Duration']]
+        
+        for session in sorted(sessions, key=lambda x: x['start_time']):
+            start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+            end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+            
+            session_data.append([
+                session['subject'],
+                start_time,
+                end_time,
+                self._format_time(session['total_study_time']),
+                self._format_time(session['total_break_time'])
             ])
         
-        subject_table = Table(subject_data, colWidths=[2.5*inch, 2*inch, 1.5*inch])
-        subject_table.setStyle(TableStyle([
+        # UPDATED: Add total row with proper styling
+        total_study_time = sum(session['total_study_time'] for session in sessions)
+        total_break_time = sum(session['total_break_time'] for session in sessions)
+        
+        session_data.append([
+            'Total',
+            '',
+            '',
+            self._format_time(total_study_time),
+            self._format_time(total_break_time)
+        ])
+        
+        # UPDATED: Modified column widths to accommodate new columns
+        session_table = Table(session_data, colWidths=[1*inch, 0.9*inch, 0.9*inch, 1.1*inch, 1.1*inch])
+        
+        # UPDATED: Improved table styling
+        table_styles = [
             ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('BOX', (0, 0), (-1, -1), 1, colors.black),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ]))
+        ]
         
-        story.append(subject_table)
-        story.append(Spacer(1, 0.5*inch))  # Increased spacing
+        # Style the total row
+        total_row_index = len(session_data) - 1
+        table_styles.extend([
+            ('BACKGROUND', (0, total_row_index), (-1, total_row_index), self.pastel_colors['accent1']),
+            ('FONTNAME', (0, total_row_index), (-1, total_row_index), 'Helvetica-Bold'),
+            ('ALIGN', (0, total_row_index), (0, total_row_index), 'LEFT'),
+            ('ALIGN', (3, total_row_index), (4, total_row_index), 'RIGHT'),
+        ])
         
-        # Subject pie chart - add to a new page with adjusted positioning
-        story.append(PageBreak())
-        subject_pie_title = Paragraph("Subject Distribution", self.styles['RMT_SectionHeader'])
-        story.append(subject_pie_title)
+        # Alternate row colors and right-align duration columns
+        for i in range(1, len(session_data) - 1):
+            if i % 2 == 0:
+                table_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['contrast']))
+            table_styles.extend([
+                ('ALIGN', (3, i), (4, i), 'RIGHT')  # Right align duration columns
+            ])
+            
+        session_table.setStyle(TableStyle(table_styles))
+        story.append(session_table)
+    
+    # Add creator footer
+    story.append(Spacer(1, 0.5*inch))
+    footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
+    story.append(footer)
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+def generate_full_report(self, user_name, sessions):
+    """Generate a comprehensive PDF report of all study sessions."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    story = []
+    
+    # Title
+    title = Paragraph(f"Study Progress Report of {user_name}, RMT", self.styles['RMT_ReportTitle'])
+    story.append(title)
+    story.append(Spacer(1, 0.5*inch))
+    
+    if not sessions:
+        no_data = Paragraph("No study sessions recorded yet.", self.styles['RMT_BodyText'])
+        story.append(no_data)
         
-        # Add extra spacing before the chart
-        story.append(Spacer(1, 0.5*inch))  # Add more space before the chart
+        # Add creator footer even when there's no data
+        story.append(Spacer(1, 0.5*inch))
+        footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
+        story.append(footer)
         
-        if subject_times:
-            # Increase the drawing height and adjust pie position
-            drawing = Drawing(500, 400)  # Increased height from 300 to 400
-            pie = Pie()
-            pie.x = 100  # Center horizontally
-            pie.y = 250  # Moved down 4x from 150 to 200
-            pie.width = 250
-            pie.height = 250
-            
-            # Get top 5 subjects by time, group others as "Other"
-            top_subjects = sorted(subject_times.items(), key=lambda x: x[1], reverse=True)
-            if len(top_subjects) > 5:
-                data_values = [t[1] for t in top_subjects[:5]]
-                data_labels = [t[0] for t in top_subjects[:5]]
-                
-                other_time = sum(t[1] for t in top_subjects[5:])
-                data_values.append(other_time)
-                data_labels.append('Other')
-            else:
-                data_values = [t[1] for t in top_subjects]
-                data_labels = [t[0] for t in top_subjects]
-            
-            pie.data = data_values
-            pie.labels = data_labels
-            pie.slices.strokeWidth = 0.5
-            
-            # Set a palette of pastel colors
-            colors_palette = [
-                self.pastel_colors['primary'],
-                self.pastel_colors['secondary'],
-                self.pastel_colors['accent1'],
-                self.pastel_colors['accent2'],
-                self.pastel_colors['accent3'],
-                self.pastel_colors['accent4']
-            ]
-            
-            for i in range(len(data_values)):
-                pie.slices[i].fillColor = colors_palette[i % len(colors_palette)]
-            
-            drawing.add(pie)
-            story.append(drawing)
-            
-            # Add extra spacing for the legend to ensure it's well below the chart
-            story.append(Spacer(1, 0.3*inch))
-            
-            # Add legend with pastel colors
-            legend_text = ""
-            for i, (subject, time) in enumerate(zip(data_labels, data_values)):
-                color = colors_palette[i % len(colors_palette)]
-                percentage = (time / total_study_time) * 100 if total_study_time > 0 else 0
-                hex_color = self._rgb_to_hex(color)
-                legend_text += f"<font color='{hex_color}'>■</font> {subject}: {self._format_time(time)} ({percentage:.1f}%)<br/>"
-            
-            legend = Paragraph(legend_text, self.styles['RMT_BodyText'])
-            story.append(legend)
-            story.append(Spacer(1, 0.5*inch))  # Increased spacing
-        
-        # Subject detail pages - add each to a new page
-        for subject in sorted(subject_times.keys()):
-            story.append(PageBreak())
-            
-            subject_page_title = Paragraph(f"Subject: {subject}", self.styles['RMT_ReportTitle'])
-            story.append(subject_page_title)
-            story.append(Spacer(1, 0.3*inch))
-            
-            subject_total = subject_times[subject]
-            subject_sessions = [s for s in sessions if s['subject'] == subject]
-            subject_percentage = (subject_total / total_study_time) * 100 if total_study_time > 0 else 0
-            
-            subject_summary = Paragraph(
-                f"Total Time: {self._format_time(subject_total)}<br/>"
-                f"Percentage of Total Study Time: {subject_percentage:.1f}%<br/>"
-                f"Number of Sessions: {len(subject_sessions)}", 
-                self.styles['RMT_BodyText']
-            )
-            story.append(subject_summary)
-            story.append(Spacer(1, 0.3*inch))
-            
-            # Daily progress for this subject
-            subject_by_date = {}
-            for session in subject_sessions:
-                date_key = session['start_time'].date()
-                if date_key not in subject_by_date:
-                    subject_by_date[date_key] = 0
-                subject_by_date[date_key] += session['total_study_time']
-            
-            if subject_by_date:
-                daily_subject_title = Paragraph(f"Daily Progress for {subject}", self.styles['RMT_SectionHeader'])
-                story.append(daily_subject_title)
-                
-                daily_data = []
-                daily_labels = []
-                
-                for date, time in sorted(subject_by_date.items()):
-                    hours = time / 3600  # Convert to hours
-                    daily_data.append(hours)
-                    daily_labels.append(date.strftime("%m/%d"))
-                
-                drawing = Drawing(500, 200)
-                bc = VerticalBarChart()
-                bc.x = 50
-                bc.y = 50
-                bc.height = 125
-                bc.width = 400
-                bc.data = [daily_data]
-                bc.strokeColor = colors.black
-                bc.fillColor = self.pastel_colors['secondary']
-                
-                bc.valueAxis.valueMin = 0
-                bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
-                bc.valueAxis.valueStep = 1
-                bc.valueAxis.labelTextFormat = '%0.1f h'
-                bc.categoryAxis.labels.boxAnchor = 'ne'
-                bc.categoryAxis.labels.dx = 8
-                bc.categoryAxis.labels.dy = -2
-                bc.categoryAxis.labels.angle = 30
-                bc.categoryAxis.categoryNames = daily_labels
-                
-                drawing.add(bc)
-                story.append(drawing)
-                story.append(Spacer(1, 0.5*inch))  # Increased spacing
-            
-            # Sessions for this subject - group by date like the main timeline
-            sessions_title = Paragraph("Sessions", self.styles['RMT_SectionHeader'])
-            story.append(sessions_title)
-            
-            if subject_sessions:
-                # Group sessions by date
-                subject_sessions_by_date = {}
-                for session in subject_sessions:
-                    date_key = session['start_time'].date()
-                    if date_key not in subject_sessions_by_date:
-                        subject_sessions_by_date[date_key] = []
-                    subject_sessions_by_date[date_key].append(session)
-                
-                # Create session tables for each date
-                for date, day_sessions in sorted(subject_sessions_by_date.items(), reverse=True):
-                    # Date header
-                    date_header = Paragraph(f"<b>{date.strftime('%Y-%m-%d')}</b>", self.styles['RMT_BodyText'])
-                    story.append(date_header)
-                    
-                    # Create session table for this date
-                    session_data = [['Start Time', 'End Time', 'Duration']]  # Header row
-                    
-                    # Add session rows
-                    for session in sorted(day_sessions, key=lambda x: x['start_time']):
-                        start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                        end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
-                        
-                        session_data.append([
-                            start_time,
-                            end_time,
-                            self._format_time(session['total_study_time'])
-                        ])
-                    
-                    # Calculate day total
-                    day_total = sum(session['total_study_time'] for session in day_sessions)
-                    
-                    # Add total row
-                    session_data.append([
-                        "<b>Total</b>",
-                        "",
-                        f"<b>{self._format_time(day_total)}</b>"
-                    ])
-                    
-                    # Create and style the table
-                    date_table = Table(session_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch])
-                    
-                    # Apply styling
-                    row_styles = []
-                    for i in range(len(session_data)):
-                        if i == 0:  # Header row
-                            row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['primary']))
-                            row_styles.append(('TEXTCOLOR', (0, i), (-1, i), colors.white))
-                            row_styles.append(('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'))
-                            row_styles.append(('ALIGN', (0, i), (-1, i), 'CENTER'))
-                        elif i == len(session_data) - 1:  # Total row
-                            row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['accent1']))
-                            row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))
-                        else:  # Data rows
-                            if i % 2 == 1:  # Alternate row coloring
-                                row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['contrast']))
-                            row_styles.append(('ALIGN', (-1, i), (-1, i), 'RIGHT'))  # Right-align duration
-                            row_styles.append(('ALIGN', (0, i), (1, i), 'CENTER'))  # Center-align times
-                    
-                    # General table styling
-                    date_table.setStyle(TableStyle([
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                        ('BOX', (0, 0), (-1, -1), 1, colors.black),
-                        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                        ('TOPPADDING', (0, 0), (-1, -1), 6),
-                        *row_styles
-                    ]))
-                    
-                    story.append(date_table)
-                    story.append(Spacer(1, 0.3*inch))  # Add space between date sections
-            else:
-                no_sessions = Paragraph("No sessions recorded for this subject.", self.styles['RMT_BodyText'])
-                story.append(no_sessions)
-            
-            # Add creator footer to each subject page
-            story.append(Spacer(1, 0.5*inch))
-            footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
-            story.append(footer)
-        
-        # For the main page, add creator footer at the end
-        if not subject_times:
-            story.append(Spacer(1, 0.5*inch))
-            footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
-            story.append(footer)
-        
-        # Build PDF
         doc.build(story)
         buffer.seek(0)
         return buffer
+    
+    # Clean subject names by removing emojis
+    for session in sessions:
+        session['subject'] = self._remove_emojis(session['subject'])
+    
+    # Sort sessions by date
+    sessions.sort(key=lambda x: x['start_time'])
+    
+    # Group sessions by date
+    sessions_by_date = {}
+    for session in sessions:
+        date_key = session['start_time'].date()
+        if date_key not in sessions_by_date:
+            sessions_by_date[date_key] = []
+        sessions_by_date[date_key].append(session)
+    
+    # Calculate overall statistics
+    total_study_time = sum(session['total_study_time'] for session in sessions)
+    total_break_time = sum(session['total_break_time'] for session in sessions)
+    total_days = len(sessions_by_date)
+    first_date = min(sessions_by_date.keys())
+    last_date = max(sessions_by_date.keys())
+    days_span = (last_date - first_date).days + 1
+    
+    # Add key statistics section
+    stats_title = Paragraph("Key Statistics", self.styles['RMT_SectionHeader'])
+    story.append(stats_title)
+    
+    stats_data = [
+        ['Metric', 'Value'],
+        ['Total Study Time', self._format_time(total_study_time)],
+        ['Total Break Time', self._format_time(total_break_time)],
+        ['Days Studied', str(total_days)],
+        ['Study Span', f"{days_span} days ({first_date.strftime('%Y-%m-%d')} to {last_date.strftime('%Y-%m-%d')})"],
+        ['Avg. Study Time/Day', self._format_time(total_study_time / max(1, total_days))],
+        ['Total Sessions', str(len(sessions))]
+    ]
+    
+    ratio = "N/A"
+    if total_break_time > 0:
+        study_minutes = int(total_study_time / 60)
+        break_minutes = int(total_break_time / 60)
+        
+        def gcd(a, b):
+            while b:
+                a, b = b, a % b
+            return a
+        
+        divisor = gcd(study_minutes, break_minutes)
+        if divisor > 0:
+            ratio = f"{study_minutes//divisor}:{break_minutes//divisor}"
+    
+    stats_data.append(['Study:Break Ratio', ratio])
+    
+    stats_table = Table(stats_data, colWidths=[2.5*inch, 2.5*inch])
+    stats_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('BOX', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ]))
+    story.append(stats_table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Move the Daily Timeline to page 2
+    story.append(PageBreak())
+    timeline_title = Paragraph("Daily Timeline", self.styles['RMT_ReportTitle'])  # Use ReportTitle for prominence
+    story.append(timeline_title)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Create date for the report generation
+    from datetime import datetime  # Add this import explicitly
+    report_date = datetime.now(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
+    report_info = Paragraph(f"Generated on: {report_date} | User: {user_name}", self.styles['RMT_BodyText'])
+    story.append(report_info)
+    story.append(Spacer(1, 0.2*inch))
+    
+    # NEW IMPLEMENTATION - Create a single continuous table for all dates
+    # First, create the header row that will be repeated for each date
+    header_row = ['Session #', 'Subject', 'Start Time', 'End Time', 'Study Duration', 'Break Duration', 'Idle Duration']
+    
+    # Initialize the big timeline table data
+    timeline_data = []
+    
+    # Global row counter for styling
+    row_counter = 0
+    
+    # Process each date
+    for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
+        # Add date header row spanning all columns
+        date_header = [f"{date.strftime('%Y-%m-%d')}"]
+        timeline_data.append(date_header + [''] * (len(header_row) - 1))  # Empty cells to fill the row
+        row_counter += 1
+        
+        # Add column headers for this date
+        timeline_data.append(header_row)
+        row_counter += 1
+        
+        # Add session rows
+        for i, session in enumerate(sorted(day_sessions, key=lambda x: x['start_time'])):
+            start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+            end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+            
+            # Calculate idle time for the day (excluding other sessions)
+            # First determine the session duration
+            session_total_seconds = session['total_study_time'] + session['total_break_time']
+            
+            # Calculate idle time (24 hours minus session time)
+            idle_time = 24*3600 - session_total_seconds  # 24 hours in seconds minus session time
+            
+            session_row = [
+                f"{i+1}",
+                session['subject'],
+                start_time,
+                end_time,
+                self._format_time(session['total_study_time']),
+                self._format_time(session['total_break_time']),
+                self._format_time(idle_time)
+            ]
+            timeline_data.append(session_row)
+            row_counter += 1
+        
+        # Calculate day totals
+        day_study_total = sum(session['total_study_time'] for session in day_sessions)
+        day_break_total = sum(session['total_break_time'] for session in day_sessions)
+        
+        # Calculate total session time for the day
+        day_total_session_time = day_study_total + day_break_total
+        
+        # Calculate idle time (24 hours minus total session time)
+        day_idle_time = 24*3600 - day_total_session_time
+        
+        # Add total row for this date
+        total_row = [
+            'Total', 
+            '', 
+            '', 
+            '', 
+            self._format_time(day_study_total),
+            self._format_time(day_break_total),
+            self._format_time(day_idle_time)
+        ]
+        timeline_data.append(total_row)
+        row_counter += 1
+    
+    # Add a grand total at the end if there's more than one date
+    if len(sessions_by_date) > 1:
+        grand_study_total = sum(sum(session['total_study_time'] for session in day_sessions) 
+                              for day_sessions in sessions_by_date.values())
+        grand_break_total = sum(sum(session['total_break_time'] for session in day_sessions)
+                              for day_sessions in sessions_by_date.values())
+        
+        # Calculate total time spent (study + break)
+        grand_total_session_time = grand_study_total + grand_break_total
+        
+        # Calculate total days × 24 hours
+        total_time_period = len(sessions_by_date) * 24 * 3600  # in seconds
+        
+        # Grand total idle time
+        grand_idle_total = total_time_period - grand_total_session_time
+        
+        grand_total_row = [
+            'GRAND TOTAL', 
+            '', 
+            '', 
+            '', 
+            self._format_time(grand_study_total),
+            self._format_time(grand_break_total),
+            self._format_time(grand_idle_total)
+        ]
+        timeline_data.append(grand_total_row)
+        row_counter += 1
+    
+    # Create the timeline table with proper column widths
+    timeline_table = Table(timeline_data, colWidths=[0.6*inch, 1.4*inch, 0.9*inch, 0.9*inch, 0.9*inch, 0.9*inch, 0.9*inch])
+    
+    # Initialize table style with basic settings
+    table_style = [
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('BOX', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+    ]
+    
+    # Row-specific styling
+    row_index = 0
+    date_header_indices = []
+    header_row_indices = []
+    total_row_indices = []
+    grand_total_index = None
+    
+    for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
+        # Date header row
+        date_header_indices.append(row_index)
+        row_index += 1
+        
+        # Column headers row
+        header_row_indices.append(row_index)
+        row_index += 1
+        
+        # Session rows
+        for _ in day_sessions:
+            row_index += 1
+        
+        # Total row for this date
+        total_row_indices.append(row_index)
+        row_index += 1
+    
+    # Grand total row if applicable
+    if len(sessions_by_date) > 1:
+        grand_total_index = row_index - 1
+    
+    # Apply styling based on row types
+    for i in date_header_indices:
+        table_style.extend([
+            ('BACKGROUND', (0, i), (-1, i), self.pastel_colors['secondary']),
+            ('SPAN', (0, i), (-1, i)),  # Span the date header across all columns
+            ('ALIGN', (0, i), (-1, i), 'CENTER'),
+            ('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'),
+            ('TEXTCOLOR', (0, i), (-1, i), colors.black),
+        ])
+    
+    for i in header_row_indices:
+        table_style.extend([
+            ('BACKGROUND', (0, i), (-1, i), self.pastel_colors['primary']),
+            ('TEXTCOLOR', (0, i), (-1, i), colors.white),
+            ('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'),
+            ('ALIGN', (0, i), (-1, i), 'CENTER'),
+        ])
+    
+    for i in total_row_indices:
+        table_style.extend([
+            ('BACKGROUND', (0, i), (-1, i), self.pastel_colors['accent1']),
+            ('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'),
+            ('ALIGN', (0, i), (0, i), 'LEFT'),
+            ('ALIGN', (4, i), (6, i), 'RIGHT'),  # Right align all duration columns
+        ])
+    
+    if grand_total_index is not None:
+        table_style.extend([
+            ('BACKGROUND', (0, grand_total_index), (-1, grand_total_index), self.pastel_colors['accent4']),
+            ('FONTNAME', (0, grand_total_index), (-1, grand_total_index), 'Helvetica-Bold'),
+            ('ALIGN', (0, grand_total_index), (0, grand_total_index), 'LEFT'),
+            ('ALIGN', (4, grand_total_index), (6, grand_total_index), 'RIGHT'),  # Right align all duration columns
+        ])
+    
+    # Add alternating row colors for better readability
+    for i, row_index in enumerate(range(row_counter)):
+        if row_index not in date_header_indices and row_index not in header_row_indices and row_index not in total_row_indices and row_index != grand_total_index:
+            if i % 2 == 1:
+                table_style.append(('BACKGROUND', (0, row_index), (-1, row_index), self.pastel_colors['contrast']))
+            # Right-align duration columns for regular rows
+            table_style.extend([
+                ('ALIGN', (4, row_index), (6, row_index), 'RIGHT')  # Right align all duration columns
+            ])
+    
+    # Apply all styling to table
+    timeline_table.setStyle(TableStyle(table_style))
+    
+    story.append(timeline_table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Overall time distribution chart - put on a new page
+    story.append(PageBreak())
+    chart_title = Paragraph("Overall Time Distribution", self.styles['RMT_SectionHeader'])
+    story.append(chart_title)
+    
+    if total_study_time > 0 or total_break_time > 0:
+        drawing = Drawing(5*inch, 3*inch)  # Increased height
+        pie = Pie()
+        pie.x = 2.5*inch
+        pie.y = 1.5*inch  # Adjusted y position
+        pie.width = 2.5*inch
+        pie.height = 2.5*inch
+        pie.data = [total_study_time, total_break_time]
+        pie.labels = ['Study', 'Break']
+        pie.slices.strokeWidth = 0.5
+        pie.slices[0].fillColor = self.pastel_colors['chart1']
+        pie.slices[1].fillColor = self.pastel_colors['chart2']
+        drawing.add(pie)
+        story.append(drawing)
+        
+        # Add legend with pastel colors
+        total_time = total_study_time + total_break_time
+        if total_time > 0:
+            legend = Paragraph(
+                f"<font color='{self._rgb_to_hex(self.pastel_colors['chart1'])}'>■</font> Study: {self._format_time(total_study_time)} ({100*total_study_time/total_time:.1f}%)<br/>"
+                f"<font color='{self._rgb_to_hex(self.pastel_colors['chart2'])}'>■</font> Break: {self._format_time(total_break_time)} ({100*total_break_time/total_time:.1f}%)",
+                self.styles['RMT_BodyText']
+            )
+            story.append(legend)
+            
+        # Add extra spacing after the chart
+        story.append(Spacer(1, 0.5*inch))  # Increased spacing
+    
+    # The rest of the function (daily study time chart, subject breakdown, etc.) remains unchanged
+    # Daily study time chart - add to a new page
+    story.append(PageBreak())
+    daily_chart_title = Paragraph("Daily Study Time", self.styles['RMT_SectionHeader'])
+    story.append(daily_chart_title)
+    
+    daily_data = []
+    daily_labels = []
+    
+    for date, day_sessions in sorted(sessions_by_date.items()):
+        day_total = sum(session['total_study_time'] for session in day_sessions) / 3600  # Convert to hours
+        daily_data.append(day_total)
+        daily_labels.append(date.strftime("%m/%d"))
+    
+    drawing = Drawing(500, 200)
+    bc = VerticalBarChart()
+    bc.x = 50
+    bc.y = 50
+    bc.height = 125
+    bc.width = 400
+    bc.data = [daily_data]
+    bc.strokeColor = colors.black
+    bc.fillColor = self.pastel_colors['primary']
+    
+    bc.valueAxis.valueMin = 0
+    bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
+    bc.valueAxis.valueStep = 1
+    bc.valueAxis.labelTextFormat = '%0.1f h'
+    bc.categoryAxis.labels.boxAnchor = 'ne'
+    bc.categoryAxis.labels.dx = 8
+    bc.categoryAxis.labels.dy = -2
+    bc.categoryAxis.labels.angle = 30
+    bc.categoryAxis.categoryNames = daily_labels
+    
+    drawing.add(bc)
+    story.append(drawing)
+    story.append(Spacer(1, 0.5*inch))  # Increased spacing
+    
+    # Subject breakdown - add to a new page
+    story.append(PageBreak())
+    subject_title = Paragraph("Subject Breakdown", self.styles['RMT_SectionHeader'])
+    story.append(subject_title)
+    
+    # Group study time by subject
+    subject_times = {}
+    for session in sessions:
+        subject = session['subject']
+        if subject not in subject_times:
+            subject_times[subject] = 0
+        subject_times[subject] += session['total_study_time']
+    
+    # Create table for subject breakdown
+    subject_data = [['Subject', 'Total Time', 'Percentage']]
+    
+    for subject, time in sorted(subject_times.items(), key=lambda x: x[1], reverse=True):
+        percentage = (time / total_study_time) * 100 if total_study_time > 0 else 0
+        subject_data.append([
+            subject, 
+            self._format_time(time), 
+            f"{percentage:.1f}%"
+        ])
+    
+    subject_table = Table(subject_data, colWidths=[2.5*inch, 2*inch, 1.5*inch])
+    subject_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), self.pastel_colors['primary']),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('BOX', (0, 0), (-1, -1), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ]))
+    
+    story.append(subject_table)
+    story.append(Spacer(1, 0.5*inch))  # Increased spacing
+    
+    # Subject pie chart - add to a new page with adjusted positioning
+    story.append(PageBreak())
+    subject_pie_title = Paragraph("Subject Distribution", self.styles['RMT_SectionHeader'])
+    story.append(subject_pie_title)
+    
+    # Add extra spacing before the chart
+    story.append(Spacer(1, 0.5*inch))  # Add more space before the chart
+    
+    if subject_times:
+        # Increase the drawing height and adjust pie position
+        drawing = Drawing(500, 400)  # Increased height from 300 to 400
+        pie = Pie()
+        pie.x = 100  # Center horizontally
+        pie.y = 250  # Moved down 4x from 150 to 200
+        pie.width = 250
+        pie.height = 250
+        
+        # Get top 5 subjects by time, group others as "Other"
+        top_subjects = sorted(subject_times.items(), key=lambda x: x[1], reverse=True)
+        if len(top_subjects) > 5:
+            data_values = [t[1] for t in top_subjects[:5]]
+            data_labels = [t[0] for t in top_subjects[:5]]
+            
+            other_time = sum(t[1] for t in top_subjects[5:])
+            data_values.append(other_time)
+            data_labels.append('Other')
+        else:
+            data_values = [t[1] for t in top_subjects]
+            data_labels = [t[0] for t in top_subjects]
+        
+        pie.data = data_values
+        pie.labels = data_labels
+        pie.slices.strokeWidth = 0.5
+        
+        # Set a palette of pastel colors
+        colors_palette = [
+            self.pastel_colors['primary'],
+            self.pastel_colors['secondary'],
+            self.pastel_colors['accent1'],
+            self.pastel_colors['accent2'],
+            self.pastel_colors['accent3'],
+            self.pastel_colors['accent4']
+        ]
+        
+        for i in range(len(data_values)):
+            pie.slices[i].fillColor = colors_palette[i % len(colors_palette)]
+        
+        drawing.add(pie)
+        story.append(drawing)
+        
+        # Add extra spacing for the legend to ensure it's well below the chart
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Add legend with pastel colors
+        legend_text = ""
+        for i, (subject, time) in enumerate(zip(data_labels, data_values)):
+            color = colors_palette[i % len(colors_palette)]
+            percentage = (time / total_study_time) * 100 if total_study_time > 0 else 0
+            hex_color = self._rgb_to_hex(color)
+            legend_text += f"<font color='{hex_color}'>■</font> {subject}: {self._format_time(time)} ({percentage:.1f}%)<br/>"
+        
+        legend = Paragraph(legend_text, self.styles['RMT_BodyText'])
+        story.append(legend)
+        story.append(Spacer(1, 0.5*inch))  # Increased spacing
+    
+    # Subject detail pages - add each to a new page
+    for subject in sorted(subject_times.keys()):
+        story.append(PageBreak())
+        
+        subject_page_title = Paragraph(f"Subject: {subject}", self.styles['RMT_ReportTitle'])
+        story.append(subject_page_title)
+        story.append(Spacer(1, 0.3*inch))
+        
+        subject_total = subject_times[subject]
+        subject_sessions = [s for s in sessions if s['subject'] == subject]
+        subject_percentage = (subject_total / total_study_time) * 100 if total_study_time > 0 else 0
+        
+        subject_summary = Paragraph(
+            f"Total Time: {self._format_time(subject_total)}<br/>"
+            f"Percentage of Total Study Time: {subject_percentage:.1f}%<br/>"
+            f"Number of Sessions: {len(subject_sessions)}", 
+            self.styles['RMT_BodyText']
+        )
+        story.append(subject_summary)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Daily progress for this subject
+        subject_by_date = {}
+        for session in subject_sessions:
+            date_key = session['start_time'].date()
+            if date_key not in subject_by_date:
+                subject_by_date[date_key] = 0
+            subject_by_date[date_key] += session['total_study_time']
+        
+        if subject_by_date:
+            daily_subject_title = Paragraph(f"Daily Progress for {subject}", self.styles['RMT_SectionHeader'])
+            story.append(daily_subject_title)
+            
+            daily_data = []
+            daily_labels = []
+            
+            for date, time in sorted(subject_by_date.items()):
+                hours = time / 3600  # Convert to hours
+                daily_data.append(hours)
+                daily_labels.append(date.strftime("%m/%d"))
+            
+            drawing = Drawing(500, 200)
+            bc = VerticalBarChart()
+            bc.x = 50
+            bc.y = 50
+            bc.height = 125
+            bc.width = 400
+            bc.data = [daily_data]
+            bc.strokeColor = colors.black
+            bc.fillColor = self.pastel_colors['secondary']
+            
+            bc.valueAxis.valueMin = 0
+            bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
+            bc.valueAxis.valueStep = 1
+            bc.valueAxis.labelTextFormat = '%0.1f h'
+            bc.categoryAxis.labels.boxAnchor = 'ne'
+            bc.categoryAxis.labels.dx = 8
+            bc.categoryAxis.labels.dy = -2
+            bc.categoryAxis.labels.angle = 30
+            bc.categoryAxis.categoryNames = daily_labels
+            
+            drawing.add(bc)
+            story.append(drawing)
+            story.append(Spacer(1, 0.5*inch))  # Increased spacing
+        
+        # Sessions for this subject - group by date like the main timeline
+        sessions_title = Paragraph("Sessions", self.styles['RMT_SectionHeader'])
+        story.append(sessions_title)
+        
+        if subject_sessions:
+            # Group sessions by date
+            subject_sessions_by_date = {}
+            for session in subject_sessions:
+                date_key = session['start_time'].date()
+                if date_key not in subject_sessions_by_date:
+                    subject_sessions_by_date[date_key] = []
+                subject_sessions_by_date[date_key].append(session)
+            
+            # Create session tables for each date
+            for date, day_sessions in sorted(subject_sessions_by_date.items(), reverse=True):
+                # Date header
+                date_header = Paragraph(f"{date.strftime('%Y-%m-%d')}", self.styles['RMT_BodyText'])
+                story.append(date_header)
+                
+                # Create session table for this date
+                session_data = [['Start Time', 'End Time', 'Study Duration', 'Break Duration']]  # UPDATED header row
+                
+                # Add session rows
+                for session in sorted(day_sessions, key=lambda x: x['start_time']):
+                    start_time = session['start_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                    end_time = 'Ongoing' if not session['end_time'] else session['end_time'].astimezone(MANILA_TZ).strftime('%I:%M %p')
+                    
+                    session_data.append([
+                        start_time,
+                        end_time,
+                        self._format_time(session['total_study_time']),
+                        self._format_time(session['total_break_time'])
+                    ])
+                
+                # Calculate day total
+                day_study_total = sum(session['total_study_time'] for session in day_sessions)
+                day_break_total = sum(session['total_break_time'] for session in day_sessions)
+                
+                # Add total row
+                session_data.append([
+                    'Total',
+                    '',
+                    self._format_time(day_study_total),
+                    self._format_time(day_break_total)
+                ])
+                
+                # Create and style the table
+                date_table = Table(session_data, colWidths=[1.2*inch, 1.2*inch, 1.3*inch, 1.3*inch])
+                
+                # Apply styling
+                row_styles = []
+                for i in range(len(session_data)):
+                    if i == 0:  # Header row
+                        row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['primary']))
+                        row_styles.append(('TEXTCOLOR', (0, i), (-1, i), colors.white))
+                        row_styles.append(('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'))
+                        row_styles.append(('ALIGN', (0, i), (-1, i), 'CENTER'))
+                    elif i == len(session_data) - 1:  # Total row
+                        row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['accent1']))
+                        row_styles.append(('FONTNAME', (0, i), (-1, i), 'Helvetica-Bold'))
+                        row_styles.append(('ALIGN', (0, i), (0, i), 'LEFT'))
+                        row_styles.append(('ALIGN', (2, i), (-1, i), 'RIGHT'))
+                    else:  # Data rows
+                        if i % 2 == 1:  # Alternate row coloring
+                            row_styles.append(('BACKGROUND', (0, i), (-1, i), self.pastel_colors['contrast']))
+                        row_styles.append(('ALIGN', (2, i), (-1, i), 'RIGHT'))  # Right-align duration columns
+                        row_styles.append(('ALIGN', (0, i), (1, i), 'CENTER'))  # Center-align times
+                
+                # General table styling
+                date_table.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('BOX', (0, 0), (-1, -1), 1, colors.black),
+                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                    ('TOPPADDING', (0, 0), (-1, -1), 6),
+                    *row_styles
+                ]))
+                
+                story.append(date_table)
+                story.append(Spacer(1, 0.3*inch))  # Add space between date sections
+        else:
+            no_sessions = Paragraph("No sessions recorded for this subject.", self.styles['RMT_BodyText'])
+            story.append(no_sessions)
+        
+        # Add creator footer to each subject page
+        story.append(Spacer(1, 0.5*inch))
+        footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
+        story.append(footer)
+    
+    # For the main page, add creator footer at the end
+    if not subject_times:
+        story.append(Spacer(1, 0.5*inch))
+        footer = Paragraph("Study tracker created by Eli.", self.styles['RMT_Footer'])
+        story.append(footer)
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 
 # ================== SINGLE INSTANCE CHECK ==================
 def ensure_single_instance():
