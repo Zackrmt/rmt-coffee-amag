@@ -415,10 +415,10 @@ class PDFReportGenerator:
     def __init__(self):
         self.styles = getSampleStyleSheet()
         
-        # Define pastel color palette
+        # Define pastel color palette - updated with pastel pink for date header
         self.pastel_colors = {
             'primary': colors.Color(0.6, 0.8, 0.9),        # Pastel blue
-            'secondary': colors.Color(0.9, 0.8, 0.6),      # Pastel orange/tan
+            'secondary': colors.Color(0.9, 0.7, 0.8),      # Pastel pink (updated from orange)
             'accent1': colors.Color(0.8, 0.9, 0.8),        # Pastel green
             'accent2': colors.Color(0.9, 0.8, 0.9),        # Pastel purple
             'accent3': colors.Color(0.9, 0.9, 0.7),        # Pastel yellow
@@ -469,6 +469,17 @@ class PDFReportGenerator:
             fontName='Helvetica'
         ))
         
+        # Added smaller text style for table headers
+        self.styles.add(ParagraphStyle(
+            name='RMT_TableHeaderSmall',
+            parent=self.styles['Normal'],
+            fontSize=7,  # Smaller font size for table headers
+            spaceAfter=0,
+            leading=8,
+            fontName='Helvetica-Bold',
+            alignment=1  # Center alignment
+        ))
+        
         self.styles.add(ParagraphStyle(
             name='RMT_Footer',
             parent=self.styles['Normal'],
@@ -496,6 +507,17 @@ class PDFReportGenerator:
             spaceAfter=6,
             spaceBefore=12
         ))
+        
+        # Add style for AI insights section
+        self.styles.add(ParagraphStyle(
+            name='RMT_AIInsight',
+            parent=self.styles['Normal'],
+            fontSize=10,
+            spaceAfter=8,
+            leading=14,
+            fontName='Helvetica-Oblique',
+            textColor=colors.Color(0.3, 0.3, 0.6)  # Soft blue-purple for AI text
+        ))
     
     def _remove_emojis(self, subject):
         """Remove emojis from subject names."""
@@ -520,6 +542,94 @@ class PDFReportGenerator:
         b = int(rgb_color.blue * 255)
         return f"#{r:02x}{g:02x}{b:02x}"
         
+    def _generate_ai_insights(self, user_name, sessions, sessions_by_date, subject_times, total_study_time, total_break_time):
+        """Generate AI insights based on study data."""
+        insights = []
+        
+        # Get some basic stats for analysis
+        total_days = len(sessions_by_date)
+        first_date = min(sessions_by_date.keys())
+        last_date = max(sessions_by_date.keys())
+        days_span = (last_date - first_date).days + 1
+        study_consistency = total_days / max(1, days_span) * 100
+        
+        # Overall consistency insight
+        if study_consistency > 80:
+            insights.append(f"You've been remarkably consistent, studying on {total_days} out of {days_span} days ({study_consistency:.1f}%)! This strong routine is a key factor in long-term retention and knowledge building.")
+        elif study_consistency > 50:
+            insights.append(f"You've maintained good study consistency, with sessions on {total_days} out of {days_span} days ({study_consistency:.1f}%). Creating even more regular habits could further boost your learning.")
+        else:
+            insights.append(f"Your study schedule shows opportunities for more consistency, with sessions on {total_days} out of {days_span} days ({study_consistency:.1f}%). Establishing a more regular routine could help strengthen knowledge retention.")
+        
+        # Subject concentration analysis
+        if subject_times:
+            top_subject = max(subject_times.items(), key=lambda x: x[1])
+            top_percentage = (top_subject[1] / total_study_time) * 100 if total_study_time > 0 else 0
+            
+            if len(subject_times) > 3:
+                if top_percentage > 50:
+                    insights.append(f"You've dedicated {top_percentage:.1f}% of your study time to {top_subject[0]}. While focus is good, consider if your other subjects need more attention for balanced preparation.")
+                else:
+                    insights.append(f"You've maintained a good balance across {len(subject_times)} subjects, with {top_subject[0]} receiving the most focus at {top_percentage:.1f}% of your time.")
+            elif len(subject_times) > 1:
+                insights.append(f"Your focus has been primarily on {len(subject_times)} subjects. Consider if this aligns with your curriculum needs or if other areas should be incorporated.")
+            else:
+                insights.append(f"You've focused exclusively on {top_subject[0]}. If you're studying for multiple subjects, consider expanding your study sessions to cover more areas.")
+        
+        # Study-break ratio analysis
+        if total_break_time > 0:
+            study_break_ratio = total_study_time / total_break_time
+            if study_break_ratio > 8:
+                insights.append(f"Your study-to-break ratio is very high at {study_break_ratio:.1f}:1. Research suggests that incorporating more short breaks can improve focus and retention.")
+            elif study_break_ratio > 4:
+                insights.append(f"Your study-to-break ratio of {study_break_ratio:.1f}:1 shows disciplined focus. This is a good balance, though ensure your breaks are refreshing enough.")
+            elif study_break_ratio > 2:
+                insights.append(f"Your study-to-break ratio of {study_break_ratio:.1f}:1 demonstrates a good balance between focused work and needed rest.")
+            else:
+                insights.append(f"Your study-to-break ratio of {study_break_ratio:.1f}:1 shows frequent breaks. While breaks are important, consider if slightly longer focused sessions might improve depth of learning.")
+        else:
+            insights.append("You haven't recorded any breaks in your study sessions. Short breaks can actually improve overall retention and focus - consider the Pomodoro technique (25 minutes study, 5 minutes break).")
+        
+        # Study pattern analysis
+        if total_days >= 3:
+            # Calculate average study time by day of week
+            day_of_week_times = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0}  # Mon-Sun
+            day_of_week_counts = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0}
+            
+            for date, day_sessions in sessions_by_date.items():
+                day_of_week = date.weekday()
+                day_time = sum(session['total_study_time'] for session in day_sessions)
+                day_of_week_times[day_of_week] += day_time
+                day_of_week_counts[day_of_week] += 1
+            
+            # Find best day
+            best_day_idx = max(day_of_week_times.items(), key=lambda x: x[1] if day_of_week_counts[x[0]] > 0 else 0)[0]
+            best_day_avg = day_of_week_times[best_day_idx] / max(1, day_of_week_counts[best_day_idx])
+            
+            days = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays"]
+            insights.append(f"Your most productive day appears to be {days[best_day_idx]}, with an average study time of {self._format_time(best_day_avg)}. Consider using this insight when planning your most challenging study topics.")
+        
+        # Progress over time
+        if total_days >= 7:
+            # Check if study time is increasing or decreasing over time
+            sorted_dates = sorted(sessions_by_date.keys())
+            if len(sorted_dates) >= 4:
+                first_half = sorted_dates[:len(sorted_dates)//2]
+                second_half = sorted_dates[len(sorted_dates)//2:]
+                
+                first_half_avg = sum(sum(s['total_study_time'] for s in sessions_by_date[date]) for date in first_half) / len(first_half)
+                second_half_avg = sum(sum(s['total_study_time'] for s in sessions_by_date[date]) for date in second_half) / len(second_half)
+                
+                if second_half_avg > first_half_avg * 1.2:
+                    insights.append(f"Your study time has been increasing over time - great job building momentum! Your average daily study time increased from {self._format_time(first_half_avg)} to {self._format_time(second_half_avg)}.")
+                elif first_half_avg > second_half_avg * 1.2:
+                    insights.append(f"Your study time has been decreasing over time. Your average daily study time dropped from {self._format_time(first_half_avg)} to {self._format_time(second_half_avg)}. This could be due to increased efficiency or other factors.")
+        
+        # Add a personalized recommendation
+        insights.append(f"{user_name}, based on your overall patterns, consider setting a goal of consistent daily study blocks, focusing on your weaker subjects while maintaining your strengths.")
+        
+        return insights
+    
     def generate_session_report(self, user_name, session):
         """Generate a PDF report for a single study session."""
         buffer = io.BytesIO()
@@ -660,8 +770,9 @@ class PDFReportGenerator:
         title = Paragraph(f"Daily Study Report", self.styles['RMT_ReportTitle'])
         story.append(title)
         
-        # User and Date
-        user_date = Paragraph(f"{user_name}, RMT<br/>{date.strftime('%Y-%m-%d')}", self.styles['RMT_ReportSubtitle'])
+        # User and Date - updated date format to Month Day, Year
+        formatted_date = date.strftime('%B %d, %Y')  # Format date as "June 19, 2025"
+        user_date = Paragraph(f"{user_name}, RMT<br/>{formatted_date}", self.styles['RMT_ReportSubtitle'])
         story.append(user_date)
         story.append(Spacer(1, 0.3*inch))
         
@@ -930,7 +1041,7 @@ class PDFReportGenerator:
             ['Total Study Time', self._format_time(total_study_time)],
             ['Total Break Time', self._format_time(total_break_time)],
             ['Days Studied', str(total_days)],
-            ['Study Span', f"{days_span} days ({first_date.strftime('%Y-%m-%d')} to {last_date.strftime('%Y-%m-%d')})"],
+            ['Study Span', f"{days_span} days ({first_date.strftime('%B %d, %Y')} to {last_date.strftime('%B %d, %Y')})"],
             ['Avg. Study Time/Day', self._format_time(total_study_time / max(1, total_days))],
             ['Total Sessions', str(len(sessions))]
         ]
@@ -966,6 +1077,34 @@ class PDFReportGenerator:
         story.append(stats_table)
         story.append(Spacer(1, 0.3*inch))
         
+        # Add AI Insight section
+        story.append(PageBreak())
+        insight_title = Paragraph("A.I. Insight", self.styles['RMT_SectionHeader'])
+        story.append(insight_title)
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Calculate subject times for insights
+        subject_times = {}
+        for session in sessions:
+            subject = session['subject']
+            if subject not in subject_times:
+                subject_times[subject] = 0
+            subject_times[subject] += session['total_study_time']
+        
+        # Generate AI insights
+        insights = self._generate_ai_insights(user_name, sessions, sessions_by_date, 
+                                            subject_times, total_study_time, total_break_time)
+        
+        # Add each insight as a paragraph with bullet points
+        for i, insight in enumerate(insights):
+            if i == 0:
+                story.append(Paragraph(f"• {insight}", self.styles['RMT_AIInsight']))
+            else:
+                story.append(Spacer(1, 0.1*inch))
+                story.append(Paragraph(f"• {insight}", self.styles['RMT_AIInsight']))
+        
+        story.append(Spacer(1, 0.3*inch))
+        
         # Move the Daily Timeline to page 2
         story.append(PageBreak())
         timeline_title = Paragraph("Daily Timeline", self.styles['RMT_ReportTitle'])  # Use ReportTitle for prominence
@@ -974,14 +1113,23 @@ class PDFReportGenerator:
         
         # Create date for the report generation
         from datetime import datetime  # Add this import explicitly
-        report_date = datetime.now(MANILA_TZ).strftime('%Y-%m-%d %I:%M %p')
+        report_date = datetime.now(MANILA_TZ).strftime('%B %d, %Y %I:%M %p')
         report_info = Paragraph(f"Generated on: {report_date} | User: {user_name}", self.styles['RMT_BodyText'])
         story.append(report_info)
         story.append(Spacer(1, 0.2*inch))
         
         # NEW IMPLEMENTATION - Create a single continuous table for all dates
         # First, create the header row that will be repeated for each date
-        header_row = ['Session #', 'Subject', 'Start Time', 'End Time', 'Study Duration', 'Break Duration', 'Idle Duration']
+        # Use paragraphs for header columns to ensure text fits in cells
+        header_row = [
+            Paragraph("Session #", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("Subject", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("Start Time", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("End Time", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("Study Duration", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("Break Duration", self.styles['RMT_TableHeaderSmall']),
+            Paragraph("Idle Duration", self.styles['RMT_TableHeaderSmall'])
+        ]
         
         # Initialize the big timeline table data
         timeline_data = []
@@ -989,10 +1137,11 @@ class PDFReportGenerator:
         # Global row counter for styling
         row_counter = 0
         
-        # Process each date
-        for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
-            # Add date header row spanning all columns
-            date_header = [f"{date.strftime('%Y-%m-%d')}"]
+        # Process each date - CHANGED FROM REVERSE=TRUE TO REVERSE=FALSE
+        for date, day_sessions in sorted(sessions_by_date.items(), reverse=False):
+            # Add date header row spanning all columns - UPDATED DATE FORMAT
+            formatted_date = date.strftime('%B %d, %Y')  # Changed format to "June 19, 2025"
+            date_header = [formatted_date]
             timeline_data.append(date_header + [''] * (len(header_row) - 1))  # Empty cells to fill the row
             row_counter += 1
             
@@ -1050,9 +1199,9 @@ class PDFReportGenerator:
         # Add a grand total at the end if there's more than one date
         if len(sessions_by_date) > 1:
             grand_study_total = sum(sum(session['total_study_time'] for session in day_sessions) 
-                                  for day_sessions in sessions_by_date.values())
+                                 for day_sessions in sessions_by_date.values())
             grand_break_total = sum(sum(session['total_break_time'] for session in day_sessions)
-                                  for day_sessions in sessions_by_date.values())
+                                 for day_sessions in sessions_by_date.values())
             
             # Calculate total time spent (study + break)
             grand_total_session_time = grand_study_total + grand_break_total
@@ -1095,7 +1244,7 @@ class PDFReportGenerator:
         total_row_indices = []
         grand_total_index = None
         
-        for date, day_sessions in sorted(sessions_by_date.items(), reverse=True):
+        for date, day_sessions in sorted(sessions_by_date.items(), reverse=False):
             # Date header row
             date_header_indices.append(row_index)
             row_index += 1
@@ -1119,6 +1268,7 @@ class PDFReportGenerator:
         # Apply styling based on row types
         for i in date_header_indices:
             table_style.extend([
+                # CHANGED COLOR FROM SECONDARY TO PASTEL PINK
                 ('BACKGROUND', (0, i), (-1, i), self.pastel_colors['secondary']),
                 ('SPAN', (0, i), (-1, i)),  # Span the date header across all columns
                 ('ALIGN', (0, i), (-1, i), 'CENTER'),
@@ -1199,7 +1349,6 @@ class PDFReportGenerator:
             # Add extra spacing after the chart
             story.append(Spacer(1, 0.5*inch))  # Increased spacing
         
-        # The rest of the function (daily study time chart, subject breakdown, etc.) remains unchanged
         # Daily study time chart - add to a new page
         story.append(PageBreak())
         daily_chart_title = Paragraph("Daily Study Time", self.styles['RMT_SectionHeader'])
@@ -1221,7 +1370,8 @@ class PDFReportGenerator:
         bc.width = 400
         bc.data = [daily_data]
         bc.strokeColor = colors.black
-        bc.fillColor = self.pastel_colors['primary']
+        # CHANGED to use pastel color
+        bc.fillColor = self.pastel_colors['chart1']
         
         bc.valueAxis.valueMin = 0
         bc.valueAxis.valueMax = max(daily_data) * 1.1 if daily_data else 5
@@ -1391,6 +1541,7 @@ class PDFReportGenerator:
                 bc.width = 400
                 bc.data = [daily_data]
                 bc.strokeColor = colors.black
+                # CHANGED to use pastel color instead of default red
                 bc.fillColor = self.pastel_colors['secondary']
                 
                 bc.valueAxis.valueMin = 0
@@ -1422,8 +1573,9 @@ class PDFReportGenerator:
                 
                 # Create session tables for each date
                 for date, day_sessions in sorted(subject_sessions_by_date.items(), reverse=True):
-                    # Date header
-                    date_header = Paragraph(f"{date.strftime('%Y-%m-%d')}", self.styles['RMT_BodyText'])
+                    # Date header - UPDATED DATE FORMAT
+                    formatted_date = date.strftime('%B %d, %Y')
+                    date_header = Paragraph(f"{formatted_date}", self.styles['RMT_BodyText'])
                     story.append(date_header)
                     
                     # Create session table for this date
