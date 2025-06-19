@@ -25,7 +25,8 @@ from telegram.ext import (
     filters,
     ApplicationBuilder,
     PersistenceInput,
-    PicklePersistence
+    PicklePersistence,
+    TypeHandler
 )
 from telegram.error import Conflict
 
