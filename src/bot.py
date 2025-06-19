@@ -1906,7 +1906,13 @@ class TelegramBot:
             thread_id = context.user_data['thread_id']
         elif context.user_data.get('current_thread_id'):
             thread_id = context.user_data['current_thread_id']
-
+        
+        # Log the thread_id for debugging
+        if thread_id:
+            logger.debug(f"Sending message to thread {thread_id}")
+        else:
+            logger.debug("Sending message to main chat (no thread)")
+        
         message = await context.bot.send_message(
             chat_id=chat_id,
             text=text,
@@ -1980,15 +1986,20 @@ class TelegramBot:
         self.record_activity()
         
         # Store the thread_id if the message is in a topic
+        # This is the key part that needs fixing - ensure we capture message_thread_id
         if update.message and update.message.is_topic_message:
             context.user_data['thread_id'] = update.message.message_thread_id
             logger.info(f"Started in thread {update.message.message_thread_id}")
+        elif update.effective_message and update.effective_message.is_topic_message:
+            # This catches cases when clicking on old messages in threads
+            context.user_data['thread_id'] = update.effective_message.message_thread_id
+            logger.info(f"Started in thread (from effective_message) {update.effective_message.message_thread_id}")
         else:
             # Clear any existing thread_id if this is in main chat
             if 'thread_id' in context.user_data:
                 del context.user_data['thread_id']
         
-        # Modified buttons array to include the new "LAST SESSION REPORT" button
+        # Modified buttons array to include the "LAST SESSION REPORT" button
         buttons = [
             [InlineKeyboardButton("Start Studying 📚", callback_data='start_studying')],
             [InlineKeyboardButton("MY OVERALL PROGRESS 📊", callback_data='overall_progress')],
@@ -2015,7 +2026,13 @@ class TelegramBot:
         # Add this user to pending sessions
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
-        thread_id = update.message.message_thread_id if update.message and update.message.is_topic_message else None
+        
+        # Get thread_id from either message or effective_message
+        thread_id = None
+        if update.message and update.message.is_topic_message:
+            thread_id = update.message.message_thread_id
+        elif update.effective_message and update.effective_message.is_topic_message:
+            thread_id = update.effective_message.message_thread_id
         
         # Create a pending session
         self.pending_sessions[user_id] = PendingSession(
