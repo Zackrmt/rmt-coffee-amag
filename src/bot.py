@@ -2215,14 +2215,26 @@ class TelegramBot:
         # Check user_data for thread_id
         if 'thread_id' in context.user_data:
             thread_id = context.user_data['thread_id']
+            logger.debug(f"Using thread_id {thread_id} from user_data")
         elif 'current_thread_id' in context.user_data:
             thread_id = context.user_data['current_thread_id']
+            logger.debug(f"Using current_thread_id {thread_id} from user_data")
         
         # Also check pending sessions as a fallback
-        if not thread_id and hasattr(context, 'user_id') and context.user_id in self.pending_sessions:
-            pending_thread_id = self.pending_sessions[context.user_id].thread_id
+        user_id = None
+        if hasattr(context, 'user_id'):
+            user_id = context.user_id
+        elif hasattr(context, '_user_id'):
+            user_id = context._user_id
+        # Try to get user_id from effective user if available
+        elif context and hasattr(context, 'effective_user') and context.effective_user:
+            user_id = context.effective_user.id
+            
+        if user_id and user_id in self.pending_sessions:
+            pending_thread_id = self.pending_sessions[user_id].thread_id
             if pending_thread_id:
                 thread_id = pending_thread_id
+                logger.debug(f"Using thread_id {thread_id} from pending session")
         
         # Debug logging
         if thread_id:
@@ -2327,12 +2339,14 @@ class TelegramBot:
         if thread_id:
             context.user_data['thread_id'] = thread_id
             context.user_data['current_thread_id'] = thread_id
+            logger.info(f"Thread ID {thread_id} saved to user data")
         else:
             # Clear any existing thread_id if this is in main chat
             if 'thread_id' in context.user_data:
                 del context.user_data['thread_id']
             if 'current_thread_id' in context.user_data:
                 del context.user_data['current_thread_id']
+            logger.info("No thread ID found, cleared from user data if any")
         
         # Modified buttons array to include the "LAST SESSION REPORT" button
         buttons = [
@@ -2373,6 +2387,7 @@ class TelegramBot:
         # Store the thread_id in the pending session
         if thread_id:
             self.pending_sessions[user_id].thread_id = thread_id
+            logger.info(f"Thread ID {thread_id} saved to pending session")
         
         # Schedule cleanup task for this pending session
         asyncio.create_task(self.schedule_pending_session_cleanup(user_id))
@@ -3096,13 +3111,16 @@ class TelegramBot:
             # Generate PDF
             pdf_buffer = self.pdf_generator.generate_full_report(user_name, all_sessions)
             
+            # Add current date for the filename
+            current_date = datetime.datetime.now(MANILA_TZ).strftime('%Y-%m-%d')
+            
             # Send the PDF file
             await self.send_document(
                 context,
                 update.effective_chat.id,
                 pdf_buffer,
-                filename=f"{user_name}, RMT (DAILY REPORT for {formatted_date}).pdf",
-                caption=f"Here's your study report for today, {user_name}!"
+                filename=f"{user_name}, RMT (OVERALL REPORT as of {current_date}).pdf",
+                caption=f"Here's your overall study progress report, {user_name}!"
             )
             
             # Show start studying button
