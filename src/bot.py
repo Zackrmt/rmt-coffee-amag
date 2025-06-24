@@ -7,7 +7,7 @@ import threading
 import time
 import signal
 import atexit
-import json
+import json  # Just once is enough
 import io
 import re
 import requests
@@ -75,7 +75,7 @@ PID_FILE = "/tmp/rmt_study_bot.pid"
 PERSISTENCE_PATH = "/tmp/rmt_study_bot.pickle"
 
 # Google Drive API Constants
-CREDENTIALS_FILE = "credentials.json"
+CREDENTIALS_FILE = "credentials.json"  # Fallback file path if environment variable not available
 SCOPES = ['https://www.googleapis.com/auth/drive']
 DATABASE_FOLDER_NAME = "RMT_Study_Bot_Database"
 
@@ -137,7 +137,7 @@ class GoogleDriveDB:
         self.database_folder_id = None
         self.initialized = False
         self.local_backup = {}  # For fallback when Google Drive is unavailable
-        
+            
     def initialize(self):
         """Initialize Google Drive API client with retries."""
         max_retries = 3
@@ -145,12 +145,28 @@ class GoogleDriveDB:
         
         for attempt in range(max_retries):
             try:
-                if not os.path.exists(CREDENTIALS_FILE):
-                    logger.warning(f"Credentials file {CREDENTIALS_FILE} not found. Running with local storage only.")
+                # First try to get credentials from environment variable (GitHub Secrets)
+                credentials_json = os.environ.get('GOOGLE_CREDENTIALS')
+                
+                if credentials_json:
+                    logger.info("Using Google Drive credentials from environment variable")
+                    # Create credentials from JSON string
+                    try:
+                        credentials_info = json.loads(credentials_json)
+                        credentials = service_account.Credentials.from_service_account_info(
+                            credentials_info, scopes=SCOPES)
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse credentials JSON: {e}")
+                        return False
+                # Fall back to credential file if environment variable not found
+                elif os.path.exists(CREDENTIALS_FILE):
+                    logger.info(f"Using credentials file: {CREDENTIALS_FILE}")
+                    credentials = service_account.Credentials.from_service_account_file(
+                        CREDENTIALS_FILE, scopes=SCOPES)
+                else:
+                    logger.warning(f"No credentials available: Neither environment variable GOOGLE_CREDENTIALS nor file {CREDENTIALS_FILE} found. Running with local storage only.")
                     return False
                     
-                credentials = service_account.Credentials.from_service_account_file(
-                    CREDENTIALS_FILE, scopes=SCOPES)
                 self.drive_service = build('drive', 'v3', credentials=credentials)
                 
                 # Create or find the database folder
@@ -169,7 +185,7 @@ class GoogleDriveDB:
                 else:
                     logger.error("All Google Drive initialization attempts failed")
                     return False
-            
+    
     def _get_or_create_folder(self, folder_name):
         """Get or create a folder in Google Drive."""
         # Check if folder already exists
@@ -3723,6 +3739,7 @@ def main():
         logger.info(f"Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"Current User's Login: {CURRENT_USER}")
         logger.info(f"Process ID: {os.getpid()}")
+        logger.info(f"Google Drive credentials from environment: {'Available' if os.environ.get('GOOGLE_CREDENTIALS') else 'Not available'}")
         
         # Run the bot with retries
         asyncio.run(run_bot_with_retries())
